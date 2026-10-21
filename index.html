@@ -54,6 +54,9 @@
 </head>
 <body>
 
+  <!-- Safariフリーズ対策: 見えない生カメラを裏に配置して強制駆動させる -->
+  <video id="hiddenVideo" autoplay playsinline muted style="position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;"></video>
+
   <div class="header">
     <span class="material-symbols-outlined" style="color: #38bdf8;">videocam</span> 遅延再生カメラ
   </div>
@@ -85,11 +88,7 @@
   </div>
 
   <script>
-    const video = document.createElement('video');
-    video.autoplay = true;
-    video.playsInline = true;
-    video.muted = true;
-
+    const video = document.getElementById('hiddenVideo');
     const canvas = document.getElementById('delayCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const offscreenCanvas = document.createElement('canvas');
@@ -109,6 +108,9 @@
         
         video.srcObject = stream;
         
+        // Safari対策: 明示的に再生を指示
+        video.play().catch(e => console.error("Play error:", e));
+        
         video.onloadedmetadata = () => {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -124,7 +126,8 @@
     }
 
     function processFrame() {
-      if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      // Safari対策: 準備が完全に整う前（HAVE_ENOUGH_DATA）でも映像が取れる状態なら進める
+      if(video.readyState < 2) return; 
       
       offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
       const frameData = offCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
@@ -136,7 +139,6 @@
         const oldFrame = frameBuffer.shift();
         ctx.putImageData(oldFrame, 0, 0);
       } else {
-        // 「録画中」を「準備中...」に変更
         ctx.fillStyle = "#0f172a";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#38bdf8";
@@ -171,7 +173,6 @@
       setDelay(sec, btnElement);
     }
 
-    // 全画面表示の切り替え処理（iOSでも100%動く方式）
     function toggleFullscreen() {
       document.body.classList.toggle('is-fullscreen');
     }
