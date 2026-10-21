@@ -21,7 +21,7 @@
       display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; padding: 15px; width: 100%; box-sizing: border-box; background: #1e293b;
     }
     .delay-btn {
-      padding: 10px 16px; font-size: 1rem; font-weight: bold; color: #fff; background: rgba(255,255,255,0.1); border: 2px solid #475569; border-radius: 8px; cursor: pointer; white-space: nowrap;
+      padding: 10px 16px; font-size: 1rem; font-weight: bold; color: #fff; background: rgba(255,255,255,0.1); border: 2px solid #475569; border-radius: 8px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 4px;
     }
     .delay-btn.active {
       background: #2563eb; border-color: #3b82f6;
@@ -35,6 +35,21 @@
     .custom-input {
       width: 50px; padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #fff; text-align: center; font-size: 1rem; font-weight: bold; outline: none;
     }
+
+    /* 全画面表示用のスタイル */
+    body.is-fullscreen .header,
+    body.is-fullscreen .controls {
+      display: none !important;
+    }
+    body.is-fullscreen #videoContainer {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; max-width: none; z-index: 9999; background: #000;
+    }
+    #exitFsBtn {
+      display: none; position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.6); color: white; border: 1px solid #cbd5e1; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; z-index: 10000; align-items: center; gap: 6px;
+    }
+    body.is-fullscreen #exitFsBtn {
+      display: flex;
+    }
   </style>
 </head>
 <body>
@@ -45,6 +60,10 @@
 
   <div id="videoContainer">
     <canvas id="delayCanvas"></canvas>
+    <!-- 全画面解除ボタン -->
+    <button id="exitFsBtn" onclick="toggleFullscreen()">
+      <span class="material-symbols-outlined">close_fullscreen</span> 戻る
+    </button>
   </div>
 
   <div class="controls">
@@ -58,10 +77,14 @@
       <span style="font-weight:bold; font-size:0.9rem; color:#cbd5e1;">秒</span>
       <button class="delay-btn" onclick="setCustomDelay(this)">適用</button>
     </div>
+
+    <!-- 全画面ボタン -->
+    <button class="delay-btn" onclick="toggleFullscreen()" style="background:#059669; border-color:#10b981; margin-left:10px;">
+      <span class="material-symbols-outlined" style="font-size:1.1rem;">fullscreen</span> 全画面
+    </button>
   </div>
 
   <script>
-    // パラパラ漫画方式の裏側処理
     const video = document.createElement('video');
     video.autoplay = true;
     video.playsInline = true;
@@ -74,12 +97,11 @@
 
     let frameBuffer = [];
     let delaySeconds = 5;
-    let fps = 24; // カクつかないためのフレームレート
+    let fps = 24; 
     let loopId = null;
 
     async function startCamera() {
       try {
-        // メモリを圧迫しない解像度でカメラを起動
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
@@ -104,19 +126,17 @@
     function processFrame() {
       if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
       
-      // 1. 現在の映像を画像データとして配列に貯める
       offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
       const frameData = offCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
       frameBuffer.push(frameData);
       
       const targetFrames = delaySeconds * fps;
       
-      // 2. 指定した秒数分たまったら、一番古い画像を画面に出す
       if (frameBuffer.length >= targetFrames) {
         const oldFrame = frameBuffer.shift();
         ctx.putImageData(oldFrame, 0, 0);
       } else {
-        // 貯まるまでの間はカウントダウンを表示
+        // 「録画中」を「準備中...」に変更
         ctx.fillStyle = "#0f172a";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#38bdf8";
@@ -124,10 +144,9 @@
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const remaining = Math.ceil((targetFrames - frameBuffer.length) / fps);
-        ctx.fillText(`録画中... あと ${remaining} 秒`, canvas.width / 2, canvas.height / 2);
+        ctx.fillText(`準備中... あと ${remaining} 秒`, canvas.width / 2, canvas.height / 2);
       }
       
-      // バッファ整理（秒数を減らした時に余分な画像を消す）
       while (frameBuffer.length > targetFrames) {
         frameBuffer.shift();
       }
@@ -150,6 +169,11 @@
         return;
       }
       setDelay(sec, btnElement);
+    }
+
+    // 全画面表示の切り替え処理（iOSでも100%動く方式）
+    function toggleFullscreen() {
+      document.body.classList.toggle('is-fullscreen');
     }
 
     window.addEventListener('DOMContentLoaded', startCamera);
