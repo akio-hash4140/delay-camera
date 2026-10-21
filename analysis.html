@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>マット運動 シンプル動画分析</title>
+    <title>マット運動 ストロボ分析ツール</title>
 
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -12,7 +12,10 @@
             theme: {
                 extend: {
                     colors: {
-                        slate: { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 700: '#334155', 800: '#1e293b', 900: '#0f172a' }
+                        slate: {
+                            50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0',
+                            700: '#334155', 800: '#1e293b', 900: '#0f172a',
+                        }
                     }
                 }
             }
@@ -22,15 +25,35 @@
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- MediaPipe Pose JS -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
-
     <style>
-        .video-box { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background-color: #000; border-radius: 0.5rem; overflow: hidden; }
-        .video-box video, .video-box canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .video-box {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #000;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+
+        .video-box iframe, .video-box video, .video-box canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        /* ローディングアニメーション用 */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col font-sans select-none">
@@ -38,446 +61,238 @@
     <!-- Header -->
     <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm">
         <div class="flex items-center space-x-2">
-            <i class="fa-solid fa-child-reaching text-blue-600 text-xl"></i>
-            <h1 class="font-bold text-base text-slate-800">マット運動 AI動作分析</h1>
+            <i class="fa-solid fa-person-running text-blue-600 text-xl"></i>
+            <h1 class="font-bold text-base text-slate-800">マット運動 ストロボ分析</h1>
         </div>
 
-        <div class="flex bg-slate-100 p-1 rounded-lg border border-slate-200 gap-1 text-xs font-bold">
-            <button id="mode1Btn" onclick="switchMode(1)" class="px-3 py-1.5 rounded transition-all bg-blue-600 text-white shadow-sm">① 両方スロー</button>
-            <button id="mode2Btn" onclick="switchMode(2)" class="px-3 py-1.5 rounded transition-all text-slate-600 hover:bg-slate-200">② 速度・角度分析</button>
-            <button id="mode3Btn" onclick="switchMode(3)" class="px-3 py-1.5 rounded transition-all text-slate-600 hover:bg-slate-200">③ 連続写真化</button>
-        </div>
-
-        <button onclick="captureCurrentScreen()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
-            <i class="fa-solid fa-camera"></i> 📸 今の画面を保存
+        <!-- Screenshot Button -->
+        <button onclick="captureStrobeScreen()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
+            <i class="fa-solid fa-camera"></i> 画像として保存
         </button>
     </header>
 
-    <!-- Main Content Layout -->
-    <main class="flex-1 grid grid-rows-2 gap-2 p-2 h-[calc(100vh-55px)]">
+    <!-- Main Content Layout (2 Rows) -->
+    <main class="flex-1 grid grid-rows-2 gap-3 p-3 h-[calc(100vh-55px)]">
 
-        <!-- UPPER PANEL -->
-        <section class="bg-white rounded-lg p-2 border border-slate-200 flex flex-col min-h-0">
-            <div class="flex items-center justify-between gap-2 mb-1.5 text-xs">
-                <div class="flex items-center gap-2">
-                    <span class="bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">お手本動画</span>
-                    <select id="skillSelect" onchange="loadModelVideo()" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 font-semibold text-slate-700 focus:outline-none">
-                        <option value="kaiyakuzenren">開脚前転</option>
-                        <option value="koten">後転</option>
-                        <option value="kaiyakukoten">開脚後転</option>
-                        <option value="sokuten">側転</option>
-                        <option value="rondat">ロンダート</option>
-                        <option value="touritsuzenren">倒立前転</option>
-                        <option value="atamatouritsu">頭転</option>
-                    </select>
-                </div>
-                <div class="flex items-center gap-1">
-                    <button onclick="stepFrameBoth(-1)" class="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold"><i class="fa-solid fa-backward-step"></i> コマ戻し</button>
-                    <button id="syncPlayBtn" onclick="toggleSyncPlay()" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded"><i class="fa-solid fa-play"></i> 同期再生/停止</button>
-                    <button onclick="stepFrameBoth(1)" class="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold">コマ送り <i class="fa-solid fa-forward-step"></i></button>
-                </div>
-                <div class="flex items-center gap-1">
-                    <span class="text-slate-500">速度:</span>
-                    <button onclick="setModelSpeed(1.0)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">1.0x</button>
-                    <button onclick="setModelSpeed(0.5)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">0.5x</button>
-                    <button onclick="setModelSpeed(0.25)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">0.25x</button>
-                </div>
+        <!-- UPPER PANEL: 模範動画 (スプレッドシート連動) -->
+        <section class="bg-white rounded-lg p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm">
+            <div class="flex items-center gap-3 mb-2">
+                <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap">👀 見本</span>
+                <!-- スプレッドシートから読み込んだ技がここに入ります -->
+                <select id="taskSelect" onchange="changeModelVideo()" class="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
+                    <option value="">データを読み込み中...</option>
+                </select>
             </div>
-            <div class="flex-1 video-box">
-                <video id="modelVideo" playsinline loop muted crossorigin="anonymous" src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"></video>
+
+            <!-- Model Video Container -->
+            <div class="flex-1 video-box bg-slate-900">
+                <!-- Googleドライブの動画を表示するためのiframe -->
+                <iframe id="modelVideo" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold pointer-events-none">
+                    上のメニューから技を選んでください
+                </div>
             </div>
         </section>
 
-        <!-- LOWER PANEL -->
-        <section class="bg-white rounded-lg p-2 border border-slate-200 flex flex-col min-h-0 relative">
-            <div class="flex items-center justify-between gap-2 mb-1.5 text-xs">
-                <div class="flex items-center gap-2">
-                    <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">自分の動画</span>
-                    <button id="sourceCameraBtn" onclick="switchSource('camera')" class="px-2.5 py-1 rounded border bg-slate-700 text-white font-semibold"><i class="fa-solid fa-camera"></i> カメラ撮影</button>
-                    <button id="sourceFileBtn" onclick="switchSource('file')" class="px-2.5 py-1 rounded border bg-slate-100 text-slate-700 font-semibold"><i class="fa-solid fa-file-video"></i> ファイル選択</button>
-                    <input type="file" id="studentFileInput" accept="video/*" class="hidden" onchange="handleFileUpload(event)">
+        <!-- LOWER PANEL: 自分の動画とストロボ生成 -->
+        <section class="bg-white rounded-lg p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm relative">
+            <div class="flex items-center justify-between gap-2 mb-2">
+                <div class="flex items-center gap-3">
+                    <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap">📸 自分の動き</span>
+                    
+                    <label class="cursor-pointer bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors">
+                        <i class="fa-solid fa-video"></i> 動画を選ぶ
+                        <input type="file" id="videoUpload" accept="video/*" class="hidden">
+                    </label>
                 </div>
-                <div id="cameraControls" class="flex items-center gap-2">
-                    <button id="recordBtn" onclick="toggleRecording()" class="bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1 rounded flex items-center gap-1">
-                        <i class="fa-solid fa-circle"></i> 録画スタート
-                    </button>
-                </div>
-                <div id="strobeControls" class="hidden flex items-center gap-2">
-                    <button onclick="generateStrobeImage()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-1 rounded flex items-center gap-1">
-                        <i class="fa-solid fa-images"></i> 連続写真を生成
-                    </button>
-                </div>
-                <div class="flex items-center gap-1">
-                    <span class="text-slate-500">速度:</span>
-                    <button onclick="setStudentSpeed(1.0)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">1.0x</button>
-                    <button onclick="setStudentSpeed(0.5)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">0.5x</button>
-                    <button onclick="setStudentSpeed(0.25)" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 border rounded">0.25x</button>
-                </div>
+
+                <!-- 連続写真生成ボタン -->
+                <button id="generateBtn" disabled onclick="generateStrobe()" class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-1.5 rounded flex items-center gap-1.5 shadow-sm transition-colors">
+                    <i class="fa-solid fa-layer-group"></i> 連続写真をつくる
+                </button>
             </div>
 
-            <div id="studentDisplayArea" class="flex-1 video-box relative">
-                <video id="studentVideo" playsinline loop muted crossorigin="anonymous" class="hidden"></video>
-                <canvas id="studentCanvas"></canvas>
-
-                <div id="metricsBox" class="absolute top-2 left-2 bg-white/90 border border-slate-300 p-2 rounded text-xs shadow-md hidden pointer-events-none">
-                    <div class="font-bold text-slate-700 border-b pb-1 mb-1">分析データ</div>
-                    <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono">
-                        <div>回転速度: <span id="valSpinSpeed" class="font-bold text-blue-600">0</span> deg/s</div>
-                        <div>股関節開脚: <span id="valHipAngle" class="font-bold text-emerald-600">0</span>°</div>
-                    </div>
+            <!-- Student Video & Strobe Canvas Container -->
+            <div class="flex-1 video-box bg-black" id="studentBox">
+                <video id="studentVideo" playsinline controls class="hidden"></video>
+                <canvas id="strobeCanvas" class="hidden"></canvas>
+                
+                <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none gap-2">
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-1 text-slate-300"></i>
+                    自分の動画をアップロードしてください
                 </div>
 
-                <div id="strobeContainer" class="absolute inset-0 bg-white p-2 flex flex-col hidden z-20">
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="text-xs font-bold text-slate-700">📸 生成された連続写真（スクショ保存可能）</span>
-                        <button onclick="closeStrobePreview()" class="bg-slate-200 hover:bg-slate-300 text-xs px-2 py-0.5 rounded text-slate-700 font-bold">閉じる</button>
-                    </div>
-                    <div class="flex-1 relative flex items-center justify-center bg-black rounded overflow-hidden">
-                        <canvas id="strobeCanvas"></canvas>
-                    </div>
+                <!-- ローディング表示 -->
+                <div id="loadingOverlay" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-white hidden z-10">
+                    <div class="loader mb-2"></div>
+                    <span class="text-sm font-bold">画像を合成中...</span>
                 </div>
             </div>
         </section>
 
     </main>
 
-    <div id="toast" class="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded shadow-lg transition-all transform translate-y-20 opacity-0 pointer-events-none z-50">
+    <!-- Simple Toast -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-slate-800 text-white text-sm px-4 py-3 rounded shadow-lg transition-all transform translate-y-20 opacity-0 pointer-events-none z-50 flex items-center gap-2">
+        <i class="fa-solid fa-circle-info text-blue-400"></i>
         <span id="toastMsg">メッセージ</span>
     </div>
 
     <script>
-        let currentMode = 1;
-        let currentSource = 'camera';
-        let poseModel = null;
-        let cameraStream = null;
-        let mediaRecorder = null;
-        let recordedChunks = [];
-        let isRecording = false;
-
-        const modelVideo = document.getElementById('modelVideo');
-        const studentVideo = document.getElementById('studentVideo');
-        const studentCanvas = document.getElementById('studentCanvas');
-        const ctx = studentCanvas.getContext('2d');
-        const strobeCanvas = document.getElementById('strobeCanvas');
-
-        let lastPose = null;
-        let lastTimestamp = 0;
-        let frameHistory = [];
-
-        const modelVideos = {
-            kaiyakuzenren: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-            koten: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-            kaiyakukoten: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-            sokuten: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-            rondat: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-            touritsuzenren: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-            atamatouritsu: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/SubaruOutbackBranding.mp4'
-        };
+        // === スプレッドシート連携処理 (GAS環境用) ===
+        let taskDataList = [];
 
         window.addEventListener('DOMContentLoaded', () => {
-            initMediaPipe();
-            setupCamera();
-            window.addEventListener('resize', resizeCanvases);
+            // GAS環境で動いている場合は google.script.run を呼び出す
+            if (typeof google !== 'undefined' && google.script) {
+                google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
+            } else {
+                // ローカルやプレビュー環境用のダミーデータ（動作確認用）
+                populateSelect([
+                    { name: "開脚前転（サンプル）", url: "https://www.youtube.com/embed/dQw4w9WgXcQ" },
+                    { name: "後転（サンプル）", url: "https://www.youtube.com/embed/tgbNymZ7vqY" }
+                ]);
+            }
         });
 
-        function resizeCanvases() {
-            const container = document.getElementById('studentDisplayArea');
-            if (container) {
-                studentCanvas.width = container.clientWidth;
-                studentCanvas.height = container.clientHeight;
-                strobeCanvas.width = container.clientWidth;
-                strobeCanvas.height = container.clientHeight;
-            }
+        function populateSelect(data) {
+            taskDataList = data;
+            const select = document.getElementById("taskSelect");
+            select.innerHTML = '<option value="">▼ 技を選択してください</option>';
+            
+            data.forEach((task, index) => {
+                const option = document.createElement("option");
+                option.value = index;
+                option.textContent = task.name;
+                select.appendChild(option);
+            });
         }
 
-        function initMediaPipe() {
-            try {
-                poseModel = new Pose({
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-                });
-                poseModel.setOptions({
-                    modelComplexity: 1,
-                    smoothLandmarks: true,
-                    minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
-                });
-                poseModel.onResults(onPoseResults);
-            } catch (err) {
-                console.error("MediaPipe load error:", err);
+        function changeModelVideo() {
+            const select = document.getElementById("taskSelect");
+            const iframe = document.getElementById("modelVideo");
+            const placeholder = document.getElementById("modelPlaceholder");
+            
+            if (select.value === "") {
+                iframe.src = "";
+                placeholder.classList.remove('hidden');
+                return;
             }
+            
+            let url = taskDataList[select.value].url;
+            
+            // Googleドライブのリンクを埋め込み用プレビューURLに変換
+            if (url.includes("view?usp=sharing") || url.includes("view?usp=drivesdk")) {
+                url = url.replace(/\/view.*/, "/preview");
+            }
+            
+            iframe.src = url;
+            placeholder.classList.add('hidden');
         }
 
-        async function setupCamera() {
-            if (currentSource !== 'camera') return;
-            try {
-                if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-                cameraStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" },
-                    audio: false
-                });
-                studentVideo.srcObject = cameraStream;
-                studentVideo.classList.remove('hidden');
-                await studentVideo.play();
-                resizeCanvases();
-                requestAnimationFrame(processVideoFrame);
-            } catch (err) {
-                showToast("カメラを起動できませんでした");
-            }
-        }
+        // === 生徒動画 ＆ ストロボ生成処理 ===
+        const videoUpload = document.getElementById('videoUpload');
+        const studentVideo = document.getElementById('studentVideo');
+        const strobeCanvas = document.getElementById('strobeCanvas');
+        const ctx = strobeCanvas.getContext('2d');
+        const generateBtn = document.getElementById('generateBtn');
+        const studentPlaceholder = document.getElementById('studentPlaceholder');
+        const loadingOverlay = document.getElementById('loadingOverlay');
 
-        function switchSource(source) {
-            currentSource = source;
-            document.getElementById('sourceCameraBtn').className = source === 'camera' ? "px-2.5 py-1 rounded border bg-slate-700 text-white font-semibold" : "px-2.5 py-1 rounded border bg-slate-100 text-slate-700 font-semibold";
-            document.getElementById('sourceFileBtn').className = source === 'file' ? "px-2.5 py-1 rounded border bg-slate-700 text-white font-semibold" : "px-2.5 py-1 rounded border bg-slate-100 text-slate-700 font-semibold";
-
-            if (source === 'camera') {
-                document.getElementById('cameraControls').classList.remove('hidden');
-                studentVideo.src = "";
-                setupCamera();
-            } else {
-                document.getElementById('cameraControls').classList.add('hidden');
-                document.getElementById('studentFileInput').click();
-            }
-        }
-
-        function handleFileUpload(e) {
+        // 動画ファイルの読み込み
+        videoUpload.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) {
-                if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-                studentVideo.srcObject = null;
-                studentVideo.src = URL.createObjectURL(file);
-                studentVideo.classList.remove('hidden');
-                studentVideo.play();
-                resizeCanvases();
-                requestAnimationFrame(processVideoFrame);
-            }
-        }
-
-        function toggleRecording() {
-            if (!isRecording) startRecording();
-            else stopRecording();
-        }
-
-        function startRecording() {
-            recordedChunks = [];
-            try { mediaRecorder = new MediaRecorder(cameraStream, { mimeType: 'video/webm' }); }
-            catch (e) { mediaRecorder = new MediaRecorder(cameraStream); }
-
-            mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/mp4' });
-                studentVideo.srcObject = null;
-                studentVideo.src = URL.createObjectURL(blob);
-                studentVideo.play();
-                showToast("撮影が完了しました");
+            if (!file) return;
+            
+            const url = URL.createObjectURL(file);
+            studentVideo.src = url;
+            
+            studentPlaceholder.classList.add('hidden');
+            strobeCanvas.classList.add('hidden');
+            studentVideo.classList.remove('hidden');
+            
+            // メタデータが読み込まれたらボタンを有効化
+            studentVideo.onloadedmetadata = () => {
+                generateBtn.disabled = false;
+                strobeCanvas.width = studentVideo.videoWidth;
+                strobeCanvas.height = studentVideo.videoHeight;
             };
-            mediaRecorder.start();
-            isRecording = true;
-            document.getElementById('recordBtn').innerHTML = `<i class="fa-solid fa-square"></i> 停止`;
-            document.getElementById('recordBtn').className = "bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1 rounded flex items-center gap-1";
-        }
+        });
 
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                document.getElementById('recordBtn').innerHTML = `<i class="fa-solid fa-circle"></i> 録画スタート`;
-                document.getElementById('recordBtn').className = "bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1 rounded flex items-center gap-1";
-            }
-        }
-
-        async function processVideoFrame() {
-            if (studentVideo.readyState >= 2 && !studentVideo.paused && !studentVideo.ended) {
-                if (poseModel) await poseModel.send({ image: studentVideo });
-            } else if (studentVideo.paused || studentVideo.ended) {
-                if (lastPose && currentMode === 2) drawOverlay(lastPose);
-            }
-            requestAnimationFrame(processVideoFrame);
-        }
-
-        function onPoseResults(results) {
-            ctx.clearRect(0, 0, studentCanvas.width, studentCanvas.height);
-            ctx.drawImage(results.image, 0, 0, studentCanvas.width, studentCanvas.height);
-
-            if (results.poseLandmarks) {
-                lastPose = results.poseLandmarks;
-                const metrics = calculateMetrics(results.poseLandmarks);
-
-                if (currentMode === 2) {
-                    drawSkeleton(results.poseLandmarks, ctx);
-                    drawAnalyticsOverlay(metrics, ctx);
-                }
-
-                if (!studentVideo.paused && currentMode === 3) {
-                    frameHistory.push({
-                        image: results.image,
-                        landmarks: results.poseLandmarks,
-                        metrics: metrics
+        // ストロボ（連続写真）の生成
+        async function generateStrobe() {
+            if (studentVideo.duration <= 0) return;
+            
+            // UIの切り替え
+            generateBtn.disabled = true;
+            loadingOverlay.classList.remove('hidden');
+            studentVideo.classList.add('hidden');
+            strobeCanvas.classList.remove('hidden');
+            
+            // キャンバスを黒でクリア
+            ctx.fillStyle = "black";
+            ctx.fillRect(0, 0, strobeCanvas.width, strobeCanvas.height);
+            
+            const numFrames = 6; // 抽出するコマ数
+            const interval = studentVideo.duration / numFrames;
+            
+            studentVideo.pause();
+            
+            for (let i = 0; i < numFrames; i++) {
+                studentVideo.currentTime = interval * i;
+                
+                // 動画のシーク（指定時間への移動）が完了するのを待つ
+                await new Promise(resolve => {
+                    studentVideo.addEventListener('seeked', function onSeeked() {
+                        studentVideo.removeEventListener('seeked', onSeeked);
+                        // 描画の安定化のため少しだけ待機
+                        setTimeout(resolve, 50);
                     });
-                }
-
-                document.getElementById('valSpinSpeed').innerText = Math.round(metrics.spinSpeed);
-                document.getElementById('valHipAngle').innerText = Math.round(metrics.hipAngle);
+                });
+                
+                // 前のコマと綺麗に重ねるための透過設定
+                ctx.globalAlpha = i === 0 ? 1.0 : 0.6; 
+                ctx.globalCompositeOperation = i === 0 ? 'source-over' : 'screen';
+                
+                ctx.drawImage(studentVideo, 0, 0, strobeCanvas.width, strobeCanvas.height);
             }
+            
+            // 通常の描画モードに戻す
+            ctx.globalAlpha = 1.0;
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // 処理完了
+            loadingOverlay.classList.add('hidden');
+            generateBtn.disabled = false;
+            showToast("連続写真を生成しました！");
         }
 
-        // マイナス記号欠損の修正箇所
-        function calculateMetrics(landmarks) {
-            const lHip = landmarks[23];
-            const lKnee = landmarks[25];
-            const lShoulder = landmarks[11];
-
-            const radians = Math.atan2(lKnee.y - lHip.y, lKnee.x - lHip.x) - Math.atan2(lShoulder.y - lHip.y, lShoulder.x - lHip.x);
-            let hipAngle = Math.abs(radians * 180.0 / Math.PI);
-            if (hipAngle > 180.0) hipAngle = 360.0 - hipAngle; // 修正済
-
-            const now = performance.now();
-            let spinSpeed = 0;
-            const trunkAngle = Math.atan2(lHip.y - lShoulder.y, lHip.x - lShoulder.x) * (180 / Math.PI);
-
-            if (lastTimestamp && lastPose) {
-                const dt = (now - lastTimestamp) / 1000;
-                if (dt > 0) {
-                    const lastTrunkAngle = Math.atan2(lastPose[23].y - lastPose[11].y, lastPose[23].x - lastPose[11].x) * (180 / Math.PI);
-                    let dAngle = Math.abs(trunkAngle - lastTrunkAngle);
-                    if (dAngle > 180) dAngle = 360 - dAngle; // 修正済
-                    spinSpeed = dAngle / dt;
-                }
-            }
-            lastTimestamp = now;
-
-            return { hipAngle, spinSpeed };
-        }
-
-        function drawSkeleton(landmarks, targetCtx) {
-            drawConnectors(targetCtx, landmarks, POSE_CONNECTIONS, { color: '#2563eb', lineWidth: 3 });
-            drawLandmarks(targetCtx, landmarks, { color: '#dc2626', fillColor: '#ffffff', lineWidth: 1, radius: 4 });
-        }
-
-        function drawAnalyticsOverlay(metrics, targetCtx) {
-            if (!lastPose) return;
-            const hip = lastPose[23];
-            const x = hip.x * targetCtx.canvas.width;
-            const y = hip.y * targetCtx.canvas.height;
-
-            targetCtx.save();
-            targetCtx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-            targetCtx.strokeStyle = '#2563eb';
-            targetCtx.lineWidth = 1;
-            targetCtx.font = 'bold 12px sans-serif';
-
-            targetCtx.beginPath();
-            targetCtx.roundRect(x + 10, y - 15, 110, 38, 4);
-            targetCtx.fill();
-            targetCtx.stroke();
-
-            targetCtx.fillStyle = '#1e293b';
-            targetCtx.fillText(`回転: ${Math.round(metrics.spinSpeed)}deg/s`, x + 15, y - 1);
-            targetCtx.fillStyle = '#059669';
-            targetCtx.fillText(`開脚: ${Math.round(metrics.hipAngle)}°`, x + 15, y + 15);
-            targetCtx.restore();
-        }
-
-        function generateStrobeImage() {
-            if (frameHistory.length < 3) {
-                showToast("一度動画を再生してください");
+        // === 画面保存（スクショ）処理 ===
+        function captureStrobeScreen() {
+            // キャンバスが表示されていなければエラー
+            if (strobeCanvas.classList.contains('hidden')) {
+                showToast("先に「連続写真」を作成してください");
                 return;
             }
 
-            const sCtx = strobeCanvas.getContext('2d');
-            sCtx.clearRect(0, 0, strobeCanvas.width, strobeCanvas.height);
-            sCtx.fillStyle = '#ffffff';
-            sCtx.fillRect(0, 0, strobeCanvas.width, strobeCanvas.height);
-
-            const step = Math.floor(frameHistory.length / 5);
-            for (let i = 0; i < 5; i++) {
-                const idx = Math.min(i * step, frameHistory.length - 1);
-                const frame = frameHistory[idx];
-
-                sCtx.save();
-                sCtx.globalAlpha = 0.7 + (i * 0.06);
-                sCtx.drawImage(frame.image, 0, 0, strobeCanvas.width, strobeCanvas.height);
-
-                if (frame.landmarks) {
-                    drawSkeleton(frame.landmarks, sCtx);
-                    const hip = frame.landmarks[23];
-                    sCtx.globalAlpha = 1.0;
-                    sCtx.fillStyle = '#d97706';
-                    sCtx.font = 'bold 12px sans-serif';
-                    sCtx.fillText(`【${i+1}】${Math.round(frame.metrics.spinSpeed)}deg/s | ${Math.round(frame.metrics.hipAngle)}°`, hip.x * strobeCanvas.width - 20, hip.y * strobeCanvas.height - 15);
-                }
-                sCtx.restore();
-            }
-
-            document.getElementById('strobeContainer').classList.remove('hidden');
-            showToast("連続写真を生成しました");
-        }
-
-        function closeStrobePreview() {
-            document.getElementById('strobeContainer').classList.add('hidden');
-        }
-
-        function captureCurrentScreen() {
-            let activeCanvas = studentCanvas;
-            if (currentMode === 3 && !document.getElementById('strobeContainer').classList.contains('hidden')) {
-                activeCanvas = strobeCanvas;
-            }
-            const imageURL = activeCanvas.toDataURL('image/png');
+            const imageURL = strobeCanvas.toDataURL('image/png');
             const link = document.createElement('a');
-            link.download = `mat_analysis_screen_${Date.now()}.png`;
+            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+            link.download = `mat_strobe_${dateStr}.png`;
             link.href = imageURL;
             link.click();
-            showToast("📸 画面を画像保存しました！");
+            
+            showToast("📸 画像をダウンロードしました");
         }
 
-        function switchMode(mode) {
-            currentMode = mode;
-            document.getElementById('mode1Btn').className = mode === 1 ? "px-3 py-1.5 rounded transition-all bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded transition-all text-slate-600 hover:bg-slate-200";
-            document.getElementById('mode2Btn').className = mode === 2 ? "px-3 py-1.5 rounded transition-all bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded transition-all text-slate-600 hover:bg-slate-200";
-            document.getElementById('mode3Btn').className = mode === 3 ? "px-3 py-1.5 rounded transition-all bg-blue-600 text-white shadow-sm" : "px-3 py-1.5 rounded transition-all text-slate-600 hover:bg-slate-200";
-
-            document.getElementById('metricsBox').style.display = (mode === 2) ? 'block' : 'none';
-            document.getElementById('strobeControls').style.display = (mode === 3) ? 'flex' : 'none';
-
-            if (mode === 3) frameHistory = [];
-        }
-
-        function toggleSyncPlay() {
-            if (modelVideo.paused) {
-                modelVideo.play();
-                studentVideo.play();
-            } else {
-                modelVideo.pause();
-                studentVideo.pause();
-            }
-        }
-
-        function stepFrameBoth(dir) {
-            modelVideo.pause();
-            studentVideo.pause();
-            const dt = 1 / 30;
-            modelVideo.currentTime = Math.max(0, modelVideo.currentTime + dir * dt);
-            studentVideo.currentTime = Math.max(0, studentVideo.currentTime + dir * dt);
-        }
-
-        function setModelSpeed(spd) { modelVideo.playbackRate = spd; }
-        function setStudentSpeed(spd) { studentVideo.playbackRate = spd; }
-
-        function loadModelVideo() {
-            const sel = document.getElementById('skillSelect').value;
-            if (modelVideos[sel]) {
-                modelVideo.src = modelVideos[sel];
-                modelVideo.play();
-            }
-        }
-
+        // === トースト通知 ===
         function showToast(msg) {
             const toast = document.getElementById('toast');
             document.getElementById('toastMsg').innerText = msg;
             toast.classList.remove('translate-y-20', 'opacity-0', 'pointer-events-none');
             setTimeout(() => {
                 toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
-            }, 2500);
+            }, 3000);
         }
     </script>
 </body>
