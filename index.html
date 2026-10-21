@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>遅延再生カメラ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+  <style>
+    body {
+      margin: 0; background: #0f172a; color: #fff; font-family: sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden;
+    }
+    #videoContainer {
+      position: relative; width: 100%; max-width: 800px; aspect-ratio: 16/9; background: #000;
+    }
+    video {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .controls {
+      display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 15px; width: 100%; box-sizing: border-box; background: #1e293b;
+    }
+    .delay-btn {
+      padding: 10px 20px; font-size: 1rem; font-weight: bold; color: #fff; background: rgba(255,255,255,0.1); border: 2px solid #475569; border-radius: 8px; cursor: pointer;
+    }
+    .delay-btn.active {
+      background: #2563eb; border-color: #3b82f6;
+    }
+    .header {
+      width: 100%; padding: 10px; background: #1e293b; text-align: center; font-weight: bold; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <span class="material-symbols-outlined" style="color: #38bdf8;">videocam</span> フォーム確認カメラ
+  </div>
+
+  <div id="videoContainer">
+    <video id="delayVideoPlayer" autoplay playsinline muted></video>
+  </div>
+
+  <div class="controls">
+    <button class="delay-btn active" onclick="setDelay(3, this)">3秒遅れ</button>
+    <button class="delay-btn" onclick="setDelay(5, this)">5秒遅れ</button>
+    <button class="delay-btn" onclick="setDelay(7, this)">7秒遅れ</button>
+  </div>
+
+  <script>
+    let delaySeconds = 3;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let delayTimerId = null;
+    const videoElement = document.getElementById("delayVideoPlayer");
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" },
+          audio: false
+        });
+        
+        videoElement.srcObject = stream;
+        videoElement.play();
+
+        // バッファ処理の開始
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.start(1000); // 1秒ごとにチャンク作成
+
+        if (delayTimerId) clearInterval(delayTimerId);
+        delayTimerId = setInterval(() => {
+          if (recordedChunks.length >= delaySeconds) {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            videoElement.srcObject = null;
+            videoElement.src = URL.createObjectURL(blob);
+            
+            // 再生位置を調整して遅延を意図的に作り出す
+            videoElement.currentTime = Math.max(0, recordedChunks.length - delaySeconds);
+            videoElement.play().catch(()=>{});
+
+            // 古すぎるデータは破棄
+            if (recordedChunks.length > delaySeconds + 10) recordedChunks.shift();
+          }
+        }, 1000);
+
+      } catch (err) {
+        alert("カメラの起動に失敗しました。カメラの使用を許可してください。");
+      }
+    }
+
+    function setDelay(sec, btnElement) {
+      delaySeconds = sec;
+      document.querySelectorAll('.delay-btn').forEach(btn => btn.classList.remove('active'));
+      btnElement.classList.add('active');
+      recordedChunks = []; // 切り替え時にリセット
+    }
+
+    // ページ読み込み時に自動でカメラ起動
+    window.addEventListener('DOMContentLoaded', startCamera);
+  </script>
+</body>
+</html>
