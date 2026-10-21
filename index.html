@@ -12,92 +12,146 @@
     }
     #videoContainer {
       position: relative; width: 100%; max-width: 800px; aspect-ratio: 16/9; background: #000;
+      display: flex; align-items: center; justify-content: center;
     }
-    video {
-      width: 100%; height: 100%; object-fit: cover;
+    canvas {
+      width: 100%; height: 100%; object-fit: contain;
     }
     .controls {
-      display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 15px; width: 100%; box-sizing: border-box; background: #1e293b;
+      display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; padding: 15px; width: 100%; box-sizing: border-box; background: #1e293b;
     }
     .delay-btn {
-      padding: 10px 20px; font-size: 1rem; font-weight: bold; color: #fff; background: rgba(255,255,255,0.1); border: 2px solid #475569; border-radius: 8px; cursor: pointer;
+      padding: 10px 16px; font-size: 1rem; font-weight: bold; color: #fff; background: rgba(255,255,255,0.1); border: 2px solid #475569; border-radius: 8px; cursor: pointer; white-space: nowrap;
     }
     .delay-btn.active {
       background: #2563eb; border-color: #3b82f6;
     }
     .header {
-      width: 100%; padding: 10px; background: #1e293b; text-align: center; font-weight: bold; font-size: 1.1rem; display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 12px; background: #1e293b; text-align: center; font-weight: bold; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); z-index: 10;
+    }
+    .custom-input-group {
+      display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 8px;
+    }
+    .custom-input {
+      width: 50px; padding: 8px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #fff; text-align: center; font-size: 1rem; font-weight: bold; outline: none;
     }
   </style>
 </head>
 <body>
 
   <div class="header">
-    <span class="material-symbols-outlined" style="color: #38bdf8;">videocam</span> フォーム確認カメラ
+    <span class="material-symbols-outlined" style="color: #38bdf8;">videocam</span> 遅延再生カメラ
   </div>
 
   <div id="videoContainer">
-    <video id="delayVideoPlayer" autoplay playsinline muted></video>
+    <canvas id="delayCanvas"></canvas>
   </div>
 
   <div class="controls">
-    <button class="delay-btn active" onclick="setDelay(3, this)">3秒遅れ</button>
-    <button class="delay-btn" onclick="setDelay(5, this)">5秒遅れ</button>
-    <button class="delay-btn" onclick="setDelay(7, this)">7秒遅れ</button>
+    <button class="delay-btn active" onclick="setDelay(5, this)">5秒</button>
+    <button class="delay-btn" onclick="setDelay(7, this)">7秒</button>
+    <button class="delay-btn" onclick="setDelay(10, this)">10秒</button>
+    
+    <!-- フリー入力欄 -->
+    <div class="custom-input-group">
+      <input type="number" id="customSec" class="custom-input" min="1" max="60" value="15">
+      <span style="font-weight:bold; font-size:0.9rem; color:#cbd5e1;">秒</span>
+      <button class="delay-btn" onclick="setCustomDelay(this)">適用</button>
+    </div>
   </div>
 
   <script>
-    let delaySeconds = 3;
-    let mediaRecorder = null;
-    let recordedChunks = [];
-    let delayTimerId = null;
-    const videoElement = document.getElementById("delayVideoPlayer");
+    // パラパラ漫画方式の裏側処理
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+
+    const canvas = document.getElementById('delayCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const offscreenCanvas = document.createElement('canvas');
+    const offCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+
+    let frameBuffer = [];
+    let delaySeconds = 5;
+    let fps = 24; // カクつかないためのフレームレート
+    let loopId = null;
 
     async function startCamera() {
       try {
+        // メモリを圧迫しない解像度でカメラを起動
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "environment" },
+          video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
         
-        videoElement.srcObject = stream;
-        videoElement.play();
-
-        // バッファ処理の開始
-        recordedChunks = [];
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
-        mediaRecorder.start(1000); // 1秒ごとにチャンク作成
-
-        if (delayTimerId) clearInterval(delayTimerId);
-        delayTimerId = setInterval(() => {
-          if (recordedChunks.length >= delaySeconds) {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            videoElement.srcObject = null;
-            videoElement.src = URL.createObjectURL(blob);
-            
-            // 再生位置を調整して遅延を意図的に作り出す
-            videoElement.currentTime = Math.max(0, recordedChunks.length - delaySeconds);
-            videoElement.play().catch(()=>{});
-
-            // 古すぎるデータは破棄
-            if (recordedChunks.length > delaySeconds + 10) recordedChunks.shift();
-          }
-        }, 1000);
-
+        video.srcObject = stream;
+        
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          offscreenCanvas.width = video.videoWidth;
+          offscreenCanvas.height = video.videoHeight;
+          
+          if (loopId) clearInterval(loopId);
+          loopId = setInterval(processFrame, 1000 / fps);
+        };
       } catch (err) {
-        alert("カメラの起動に失敗しました。カメラの使用を許可してください。");
+        alert("カメラの起動に失敗しました。端末のカメラアクセス許可を確認してください。");
+      }
+    }
+
+    function processFrame() {
+      if(video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      
+      // 1. 現在の映像を画像データとして配列に貯める
+      offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      const frameData = offCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      frameBuffer.push(frameData);
+      
+      const targetFrames = delaySeconds * fps;
+      
+      // 2. 指定した秒数分たまったら、一番古い画像を画面に出す
+      if (frameBuffer.length >= targetFrames) {
+        const oldFrame = frameBuffer.shift();
+        ctx.putImageData(oldFrame, 0, 0);
+      } else {
+        // 貯まるまでの間はカウントダウンを表示
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 32px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const remaining = Math.ceil((targetFrames - frameBuffer.length) / fps);
+        ctx.fillText(`録画中... あと ${remaining} 秒`, canvas.width / 2, canvas.height / 2);
+      }
+      
+      // バッファ整理（秒数を減らした時に余分な画像を消す）
+      while (frameBuffer.length > targetFrames) {
+        frameBuffer.shift();
       }
     }
 
     function setDelay(sec, btnElement) {
       delaySeconds = sec;
       document.querySelectorAll('.delay-btn').forEach(btn => btn.classList.remove('active'));
-      btnElement.classList.add('active');
-      recordedChunks = []; // 切り替え時にリセット
+      if (btnElement) btnElement.classList.add('active');
     }
 
-    // ページ読み込み時に自動でカメラ起動
+    function setCustomDelay(btnElement) {
+      const sec = parseInt(document.getElementById('customSec').value, 10);
+      if(isNaN(sec) || sec < 1) {
+        alert("1秒以上の数字を入力してください");
+        return;
+      }
+      if(sec > 60) {
+        alert("iPadの動作を安定させるため、最大60秒までにしてください");
+        return;
+      }
+      setDelay(sec, btnElement);
+    }
+
     window.addEventListener('DOMContentLoaded', startCamera);
   </script>
 </body>
