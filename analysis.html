@@ -64,7 +64,7 @@
         
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
-            AI準備中...
+            <span id="aiStatusText">AI準備中...</span>
         </div>
     </header>
 
@@ -82,11 +82,8 @@
                 </select>
             </div>
 
-            <!-- 見本動画コンテナ -->
             <div class="flex-1 bg-black rounded overflow-hidden relative group">
-                <!-- HTML5 標準ビデオプレイヤー（シークバー付き） -->
                 <video id="modelVideo" controls crossorigin="anonymous" playsinline class="absolute inset-0 w-full h-full object-contain"></video>
-                <!-- AI描画用キャンバス（透明で上に重なる。クリックは下のビデオを貫通する） -->
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"></canvas>
                 
                 <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-bold pointer-events-none z-20">
@@ -113,11 +110,8 @@
                 </div>
             </div>
 
-            <!-- 自分の動画コンテナ -->
             <div class="flex-1 bg-black rounded overflow-hidden relative group">
-                <!-- HTML5 標準ビデオプレイヤー -->
                 <video id="studentVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
-                <!-- AI描画用キャンバス -->
                 <canvas id="studentCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
                 <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none z-20">
@@ -130,12 +124,23 @@
     </main>
 
     <script>
-        // === スプレッドシート連携 ===
+        // DOM要素
+        let modelVideo, studentVideo, videoUpload;
         let taskDataList = [];
 
+        // AI関連
+        let poseModelModel, poseModelStudent; 
+        let isAiReady = false;
+        let lastPoseModel = null, lastPoseStudent = null;
+        let isProcessingModel = false, isProcessingStudent = false;
+
         window.addEventListener('DOMContentLoaded', () => {
-            initAI();
-            
+            // 要素の取得
+            modelVideo = document.getElementById('modelVideo');
+            studentVideo = document.getElementById('studentVideo');
+            videoUpload = document.getElementById('videoUpload');
+
+            // 1. スプレッドシート連携
             if (typeof google !== 'undefined' && google.script) {
                 google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
             } else {
@@ -144,6 +149,10 @@
                     { name: "後転（サンプル）", url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4" }
                 ]);
             }
+
+            // 2. AIの初期化開始
+            initAI();
+            setupEventListeners();
         });
 
         function populateSelect(data) {
@@ -158,12 +167,10 @@
             });
         }
 
-        // Google Drive のURLを videoタグで再生できる直接ダウンロードリンクに変換する処理
         function getDirectVideoUrl(url) {
             if (!url) return "";
             const driveMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (driveMatch && driveMatch[1]) {
-                // Driveのファイルを直接読み込むための特殊パラメータ
                 return `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
             }
             return url;
@@ -171,44 +178,25 @@
 
         function changeModelVideo() {
             const select = document.getElementById("taskSelect");
-            const video = document.getElementById("modelVideo");
             const placeholder = document.getElementById("modelPlaceholder");
             
             if (select.value === "") {
-                video.src = "";
+                modelVideo.src = "";
                 placeholder.classList.remove('hidden');
                 return;
             }
             
-            const rawUrl = taskDataList[select.value].url;
-            video.src = getDirectVideoUrl(rawUrl);
+            modelVideo.src = getDirectVideoUrl(taskDataList[select.value].url);
             placeholder.classList.add('hidden');
             
-            // メタデータ読み込み後にキャンバスサイズを合わせる
-            video.onloadedmetadata = () => {
-                const canvas = document.getElementById("modelCanvas");
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
+            modelVideo.onloadedmetadata = () => {
+                document.getElementById("modelCanvas").width = modelVideo.videoWidth;
+                document.getElementById("modelCanvas").height = modelVideo.videoHeight;
             };
         }
 
-        // === AI (MediaPipe Pose) & 描画処理 ===
-        let poseModelModel, poseModelStudent; 
-        let isAiReady = false;
-        
-        let lastPoseModel = null;
-        let lastPoseStudent = null;
-        
-        let isProcessingModel = false;
-        let isProcessingStudent = false;
-
-        const videoUpload = document.getElementById('videoUpload');
-        const studentVideo = document.getElementById('studentVideo');
-        const modelVideo = document.getElementById('modelVideo');
-
         async function initAI() {
             try {
-                // 模範動画用と自分の動画用の2つのAIエンジンを独立して準備（混線を防ぐため）
                 const config = {
                     modelComplexity: 1, 
                     smoothLandmarks: true,
@@ -216,23 +204,30 @@
                     minTrackingConfidence: 0.5
                 };
 
+                // 【修正ポイント】AIを「順番に」起動し、ブラウザのパニック（競合）を防ぐ
+                document.getElementById('aiStatusText').innerText = 'AI準備中 (1/2)...';
+                
                 poseModelModel = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
                 poseModelModel.setOptions(config);
                 poseModelModel.onResults((results) => {
                     lastPoseModel = results.poseLandmarks || null;
                     drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, modelVideo.paused);
                 });
+                await poseModelModel.initialize(); // 1つ目の起動完了を完全に待つ
 
+                document.getElementById('aiStatusText').innerText = 'AI準備中 (2/2)...';
+                
                 poseModelStudent = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
                 poseModelStudent.setOptions(config);
                 poseModelStudent.onResults((results) => {
                     lastPoseStudent = results.poseLandmarks || null;
                     drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
                 });
+                await poseModelStudent.initialize(); // 2つ目の起動完了を完全に待つ
 
-                await Promise.all([poseModelModel.initialize(), poseModelStudent.initialize()]);
                 isAiReady = true;
                 
+                // 起動成功時のUI切り替え
                 const aiStatus = document.getElementById('aiStatus');
                 aiStatus.innerHTML = '<span class="material-symbols-outlined text-emerald-500" style="font-size:16px;">check_circle</span> AI準備完了';
                 aiStatus.classList.replace('bg-slate-100', 'bg-emerald-50');
@@ -247,11 +242,44 @@
 
             } catch (error) {
                 console.error("AI Initialization Error:", error);
-                document.getElementById('aiStatus').innerHTML = '<span class="material-symbols-outlined text-red-500" style="font-size:16px;">error</span> AI読込エラー';
+                // エラー内容を画面に出力して原因を特定しやすくする
+                document.getElementById('aiStatus').innerHTML = `<span class="material-symbols-outlined text-red-500" style="font-size:16px;">error</span> エラー: ${error.message}`;
+                document.getElementById('aiStatus').classList.replace('bg-slate-100', 'bg-red-50');
+                document.getElementById('aiStatus').classList.replace('text-slate-500', 'text-red-700');
             }
         }
 
-        // --- 動画再生・シーク時の処理ループ ---
+        // --- 動画のイベントリスナー設定 ---
+        function setupEventListeners() {
+            modelVideo.addEventListener('play', () => { requestAnimationFrame(processModelLoop); });
+            modelVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); });
+            modelVideo.addEventListener('seeked', async () => { 
+                if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
+            });
+
+            studentVideo.addEventListener('play', () => { requestAnimationFrame(processStudentLoop); });
+            studentVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); });
+            studentVideo.addEventListener('seeked', async () => { 
+                if (isAiReady && studentVideo.readyState >= 2) await poseModelStudent.send({ image: studentVideo }); 
+            });
+
+            videoUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file || !isAiReady) return;
+                
+                studentVideo.src = URL.createObjectURL(file);
+                document.getElementById('studentPlaceholder').classList.add('hidden');
+                studentVideo.classList.remove('hidden');
+                document.getElementById('studentCanvas').classList.remove('hidden');
+                
+                studentVideo.onloadedmetadata = () => {
+                    document.getElementById('studentCanvas').width = studentVideo.videoWidth;
+                    document.getElementById('studentCanvas').height = studentVideo.videoHeight;
+                    studentVideo.play();
+                };
+            });
+        }
+
         async function processModelLoop() {
             if (!modelVideo.paused && !modelVideo.ended && !isProcessingModel && modelVideo.readyState >= 2) {
                 isProcessingModel = true;
@@ -270,36 +298,7 @@
             }
         }
 
-        // 動画イベントリスナー（再生開始時と、シークバーでコマ送りした時にAIを動かす）
-        modelVideo.addEventListener('play', () => { requestAnimationFrame(processModelLoop); });
-        modelVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); });
-        modelVideo.addEventListener('seeked', async () => { 
-            if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
-        });
-
-        studentVideo.addEventListener('play', () => { requestAnimationFrame(processStudentLoop); });
-        studentVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); });
-        studentVideo.addEventListener('seeked', async () => { 
-            if (isAiReady && studentVideo.readyState >= 2) await poseModelStudent.send({ image: studentVideo }); 
-        });
-
-        videoUpload.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file || !isAiReady) return;
-            
-            studentVideo.src = URL.createObjectURL(file);
-            document.getElementById('studentPlaceholder').classList.add('hidden');
-            studentVideo.classList.remove('hidden');
-            document.getElementById('studentCanvas').classList.remove('hidden');
-            
-            studentVideo.onloadedmetadata = () => {
-                document.getElementById('studentCanvas').width = studentVideo.videoWidth;
-                document.getElementById('studentCanvas').height = studentVideo.videoHeight;
-                studentVideo.play();
-            };
-        });
-
-        // --- ★描画＆角度計算の共通関数★ ---
+        // --- ★描画＆角度計算関数★ ---
         const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
         const customConnections = [
             [0, 11], [0, 12], [11, 12], [23, 24], [11, 23], [12, 24], 
@@ -315,8 +314,7 @@
 
         function drawSkeleton(canvas, poseLandmarks, isPaused) {
             const ctx = canvas.getContext('2d');
-            // 前のフレームを完全に消去（ビデオ映像自体は下のvideoタグで表示されているためCanvasは透明にする）
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // キャンバスを透明にクリア
             
             if (!poseLandmarks) return;
 
@@ -360,7 +358,7 @@
                     { p1: 23, p2: 25, p3: 27 }, { p1: 24, p2: 26, p3: 28 }  // 膝
                 ];
 
-                ctx.font = 'bold 36px Arial'; // さらに大きな文字
+                ctx.font = 'bold 36px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
 
