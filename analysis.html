@@ -2,7 +2,6 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <!-- スマホ・タブレットでのスクロールと拡大縮小を完全に防止 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>マット運動 AI動作分析</title>
 
@@ -23,21 +22,19 @@
         }
     </script>
 
-    <!-- Google Material Symbols (Google公式の洗練されたアイコン) -->
+    <!-- Google Material Symbols -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,1,0" />
 
-    <!-- MediaPipe Pose JS (Local Client Execution) -->
+    <!-- MediaPipe Pose JS -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
 
     <style>
-        /* 縦スクロール禁止・画面フィット設定 */
         html, body {
             margin: 0;
             padding: 0;
             width: 100vw;
-            height: 100dvh; /* スマホのURLバーを考慮した動的ビューポート */
+            height: 100dvh;
             overflow: hidden;
         }
 
@@ -53,17 +50,16 @@
             overflow: hidden;
         }
 
-        .video-box iframe, .video-box canvas {
+        .video-box iframe, .video-box canvas, .video-box video {
             max-width: 100%;
             max-height: 100%;
-            object-fit: contain; /* アスペクト比を維持して全体を表示 */
+            object-fit: contain;
         }
         
         .material-symbols-outlined {
             vertical-align: middle;
         }
 
-        /* ローディングアニメーション用 */
         .loader {
             border: 3px solid #e2e8f0;
             border-top: 3px solid #3b82f6;
@@ -91,7 +87,6 @@
     </header>
 
     <!-- Main Content Layout -->
-    <!-- PC/タブレット横向きは左右2分割、スマホ縦向きは上下2分割に自動可変し、スクロールを防止 -->
     <main class="flex-1 grid grid-cols-1 md:grid-cols-2 grid-rows-2 md:grid-rows-1 gap-3 p-3 min-h-0">
 
         <!-- PANEL 1: 模範動画 -->
@@ -105,7 +100,6 @@
                 </select>
             </div>
 
-            <!-- Model Video Container -->
             <div class="flex-1 video-box bg-slate-900">
                 <iframe id="modelVideo" src="" class="w-full h-full border-none" allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold pointer-events-none">
@@ -128,15 +122,12 @@
                     </label>
                 </div>
                 <div class="hidden sm:block text-xs text-slate-500 font-bold">
-                    ※動画にAI骨格が重なります
+                    ※一時停止すると「角度」が出ます
                 </div>
             </div>
 
-            <!-- Student Video & Motion Capture Canvas Container -->
             <div class="flex-1 video-box bg-black cursor-pointer group" id="studentBox" onclick="togglePlayPause()" title="クリックで再生/一時停止">
-                <!-- 映像出力用の非表示Videoタグ -->
                 <video id="studentVideo" loop muted playsinline class="hidden"></video>
-                <!-- AI描画と映像を合成するCanvas -->
                 <canvas id="studentCanvas" class="hidden w-full h-full object-contain"></canvas>
                 
                 <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none gap-2">
@@ -144,7 +135,6 @@
                     AIの準備完了後に動画を選んでください
                 </div>
 
-                <!-- 再生/一時停止アイコンのフィードバック -->
                 <div id="playPauseIcon" class="absolute inset-0 flex items-center justify-center text-white opacity-0 pointer-events-none transition-opacity duration-300">
                     <span class="material-symbols-outlined drop-shadow-lg" style="font-size: 4rem;">play_arrow</span>
                 </div>
@@ -158,15 +148,11 @@
         let taskDataList = [];
 
         window.addEventListener('DOMContentLoaded', () => {
-            initMediaPipe(); // AI初期化開始
+            initMediaPipe();
             
-            // GAS環境（Apps Script）で動作しているか、GitHub等の外部サーバーかを自動判定
             if (typeof google !== 'undefined' && google.script) {
-                // GAS環境：スプレッドシートから直接取得
                 google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
             } else {
-                // GitHub Pages等環境：動作確認用のサンプルデータを表示
-                // ※将来的にGitHubからスプレッドシートのデータを読みたい場合は、GASを「Webアプリ」として公開し fetch() で取得する仕組みに変更します。
                 populateSelect([
                     { name: "開脚前転（サンプル）", url: "https://www.youtube.com/embed/dQw4w9WgXcQ" },
                     { name: "後転（サンプル）", url: "https://www.youtube.com/embed/tgbNymZ7vqY" },
@@ -200,7 +186,6 @@
             }
             
             let url = taskDataList[select.value].url;
-            // Googleドライブの共有リンクを埋め込み用(preview)に変換
             if (url.includes("view?usp=sharing") || url.includes("view?usp=drivesdk")) {
                 url = url.replace(/\/view.*/, "/preview");
             }
@@ -209,10 +194,11 @@
             placeholder.classList.add('hidden');
         }
 
-        // === AI (MediaPipe Pose) 処理 ===
+        // === AI (MediaPipe Pose) & 描画処理 ===
         let poseModel;
         let isAiReady = false;
         let isProcessingFrame = false;
+        let lastPoseLandmarks = null; // 最新の骨格データを保持
         
         const videoUpload = document.getElementById('videoUpload');
         const uploadLabel = document.getElementById('uploadLabel');
@@ -228,24 +214,20 @@
                 });
                 
                 poseModel.setOptions({
-                    modelComplexity: 1, // 0:軽量, 1:標準, 2:高精度
+                    modelComplexity: 1, 
                     smoothLandmarks: true,
                     minDetectionConfidence: 0.5,
                     minTrackingConfidence: 0.5
                 });
                 
                 poseModel.onResults(onPoseResults);
-                
-                // AIモデルを事前にウォームアップ（初期化）
                 await poseModel.initialize();
-                
                 isAiReady = true;
                 
-                // UIを有効化
                 const aiStatus = document.getElementById('aiStatus');
                 aiStatus.innerHTML = '<span class="material-symbols-outlined text-emerald-500" style="font-size:16px;">check_circle</span> AI準備完了';
-                aiStatus.classList.remove('bg-slate-100', 'text-slate-500');
-                aiStatus.classList.add('bg-emerald-50', 'text-emerald-700');
+                aiStatus.classList.replace('bg-slate-100', 'bg-emerald-50');
+                aiStatus.classList.replace('text-slate-500', 'text-emerald-700');
                 
                 uploadLabel.classList.remove('cursor-not-allowed', 'bg-slate-300', 'text-slate-500');
                 uploadLabel.classList.add('cursor-pointer', 'bg-emerald-600', 'hover:bg-emerald-700', 'text-white');
@@ -259,7 +241,6 @@
             }
         }
 
-        // 動画ファイルが選ばれたときの処理
         videoUpload.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (!file || !isAiReady) return;
@@ -270,7 +251,6 @@
             studentPlaceholder.classList.add('hidden');
             studentCanvas.classList.remove('hidden');
             
-            // 動画のメタデータが読み込まれたらキャンバスサイズを合わせる
             studentVideo.onloadedmetadata = () => {
                 studentCanvas.width = studentVideo.videoWidth;
                 studentCanvas.height = studentVideo.videoHeight;
@@ -279,36 +259,131 @@
             };
         });
 
-        // 動画のフレームごとにAI解析へ投げるループ
         async function processVideoLoop() {
             if (!studentVideo.paused && !studentVideo.ended && !isProcessingFrame) {
                 isProcessingFrame = true;
-                // 現在の映像フレームをMediaPipeへ送信
                 await poseModel.send({ image: studentVideo });
                 isProcessingFrame = false;
             }
             requestAnimationFrame(processVideoLoop);
         }
 
-        // AIの解析結果が返ってきたときの描画処理 (動画フレーム + 骨格)
+        // AIからデータが返ってきたら描画関数へ
         function onPoseResults(results) {
+            lastPoseLandmarks = results.poseLandmarks || null;
+            drawFrame();
+        }
+
+        // --- ★ここから下が「厳選ポイント」「太い線」「角度計算」のメイン処理★ ---
+
+        // 描画したい厳選ポイントの定義
+        // 0:鼻(頭), 11/12:肩, 13/14:肘, 15/16:手首, 23/24:腰(骨盤), 25/26:膝, 27/28:足首
+        const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+        const customConnections = [
+            [0, 11], [0, 12],     // 頭〜肩
+            [11, 12],             // 肩幅
+            [23, 24],             // 腰幅
+            [11, 23], [12, 24],   // 胴体
+            [11, 13], [13, 15],   // 腕（左）
+            [12, 14], [14, 16],   // 腕（右）
+            [23, 25], [25, 27],   // 脚（左）
+            [24, 26], [26, 28]    // 脚（右）
+        ];
+
+        // 3点間の角度を計算する関数
+        function calculateAngle(p1, p2, p3) {
+            const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+            if (angle > 180.0) angle = 360.0 - angle;
+            return Math.round(angle);
+        }
+
+        function drawFrame() {
             ctx.save();
             ctx.clearRect(0, 0, studentCanvas.width, studentCanvas.height);
             
-            // 1. 元の動画フレームを描画
-            ctx.drawImage(results.image, 0, 0, studentCanvas.width, studentCanvas.height);
+            // 映像をCanvasに描画
+            ctx.drawImage(studentVideo, 0, 0, studentCanvas.width, studentCanvas.height);
             
-            // 2. 骨格が検出されていればオーバーレイ描画
-            if (results.poseLandmarks) {
-                drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, 
-                             { color: '#00FF00', lineWidth: 4 }); // 緑色の線
-                drawLandmarks(ctx, results.poseLandmarks, 
-                            { color: '#FF0000', fillColor: '#FFFFFF', lineWidth: 2, radius: 4 }); // 赤枠・白塗りの点
+            if (lastPoseLandmarks) {
+                const width = studentCanvas.width;
+                const height = studentCanvas.height;
+                const isPaused = studentVideo.paused;
+
+                // 1. 太い線を引く
+                ctx.lineWidth = 8; // 線の太さ
+                ctx.strokeStyle = '#00FF00'; // 鮮やかな緑
+                
+                customConnections.forEach(([i, j]) => {
+                    const p1 = lastPoseLandmarks[i];
+                    const p2 = lastPoseLandmarks[j];
+                    if (p1.visibility > 0.5 && p2.visibility > 0.5) {
+                        ctx.beginPath();
+                        ctx.moveTo(p1.x * width, p1.y * height);
+                        ctx.lineTo(p2.x * width, p2.y * height);
+                        ctx.stroke();
+                    }
+                });
+
+                // 2. 大きな関節マーカーを描画
+                targetJoints.forEach(i => {
+                    const p = lastPoseLandmarks[i];
+                    if (p.visibility > 0.5) {
+                        ctx.beginPath();
+                        ctx.arc(p.x * width, p.y * height, 10, 0, 2 * Math.PI); // 半径10の大きな円
+                        ctx.fillStyle = '#FFFFFF'; // 中は白
+                        ctx.fill();
+                        ctx.lineWidth = 4; // 枠線の太さ
+                        ctx.strokeStyle = '#FF0000'; // 枠は赤
+                        ctx.stroke();
+                    }
+                });
+
+                // 3. 一時停止中なら「角度」を描画
+                if (isPaused) {
+                    // 角度を測りたい関節の組み合わせ [端点1, 頂点(角度を出す場所), 端点2]
+                    const angleTargets = [
+                        { p1: 23, p2: 11, p3: 13 }, // 左肩 (腰-肩-肘)
+                        { p1: 24, p2: 12, p3: 14 }, // 右肩
+                        { p1: 11, p2: 13, p3: 15 }, // 左肘 (肩-肘-手)
+                        { p1: 12, p2: 14, p3: 16 }, // 右肘
+                        { p1: 11, p2: 23, p3: 25 }, // 左腰 (肩-腰-膝)
+                        { p1: 12, p2: 24, p3: 26 }, // 右腰
+                        { p1: 23, p2: 25, p3: 27 }, // 左膝 (腰-膝-足首)
+                        { p1: 24, p2: 26, p3: 28 }  // 右膝
+                    ];
+
+                    ctx.font = 'bold 28px Arial'; // 文字サイズ大きく
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    angleTargets.forEach(joint => {
+                        const pt1 = lastPoseLandmarks[joint.p1];
+                        const pt2 = lastPoseLandmarks[joint.p2]; // 角度の中心
+                        const pt3 = lastPoseLandmarks[joint.p3];
+
+                        // 3点すべてがAIに見えている場合のみ角度表示
+                        if (pt1.visibility > 0.5 && pt2.visibility > 0.5 && pt3.visibility > 0.5) {
+                            const angle = calculateAngle(pt1, pt2, pt3);
+                            const x = pt2.x * width;
+                            const y = pt2.y * height - 30; // 関節の少し上に表示
+
+                            // 見やすくするための黒いフチドリ
+                            ctx.strokeStyle = '#000000';
+                            ctx.lineWidth = 5;
+                            ctx.strokeText(angle + '°', x, y);
+                            
+                            // 黄色の文字
+                            ctx.fillStyle = '#FFFF00';
+                            ctx.fillText(angle + '°', x, y);
+                        }
+                    });
+                }
             }
             ctx.restore();
         }
 
-        // 画面クリックで再生・一時停止を切り替える
+        // 動画の再生・一時停止切り替え
         function togglePlayPause() {
             if (!studentVideo.src) return;
             
@@ -322,11 +397,13 @@
                 icon.innerHTML = '<span class="material-symbols-outlined drop-shadow-lg" style="font-size: 4rem;">pause</span>';
             }
             
-            // アイコンをフワッと表示して消す
+            // 一時停止・再生の切り替え時に画面を即座に再描画（角度の表示/非表示を即反映）
+            requestAnimationFrame(() => {
+                if (lastPoseLandmarks) drawFrame();
+            });
+            
             icon.classList.remove('opacity-0');
-            setTimeout(() => {
-                icon.classList.add('opacity-0');
-            }, 600);
+            setTimeout(() => { icon.classList.add('opacity-0'); }, 600);
         }
     </script>
 </body>
