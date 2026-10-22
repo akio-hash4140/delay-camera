@@ -2,8 +2,9 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>マット運動 モーションキャプチャ分析</title>
+    <!-- スマホ・タブレットでのスクロールと拡大縮小を完全に防止 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>マット運動 AI動作分析</title>
 
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -22,8 +23,8 @@
         }
     </script>
 
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Material Symbols (Google公式の洗練されたアイコン) -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,1,0" />
 
     <!-- MediaPipe Pose JS (Local Client Execution) -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -31,6 +32,15 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
 
     <style>
+        /* 縦スクロール禁止・画面フィット設定 */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100dvh; /* スマホのURLバーを考慮した動的ビューポート */
+            overflow: hidden;
+        }
+
         .video-box {
             position: relative;
             width: 100%;
@@ -46,44 +56,50 @@
         .video-box iframe, .video-box canvas {
             max-width: 100%;
             max-height: 100%;
-            object-fit: contain;
+            object-fit: contain; /* アスペクト比を維持して全体を表示 */
         }
         
+        .material-symbols-outlined {
+            vertical-align: middle;
+        }
+
         /* ローディングアニメーション用 */
         .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3b82f6; /* blue-500 */
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #3b82f6;
             border-radius: 50%;
-            width: 24px;
-            height: 24px;
+            width: 16px;
+            height: 16px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col font-sans select-none">
+<body class="bg-slate-50 text-slate-800 flex flex-col font-sans select-none">
 
     <!-- Header -->
-    <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm">
+    <header class="h-12 shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm z-10">
         <div class="flex items-center space-x-2">
-            <i class="fa-solid fa-person-running text-blue-600 text-xl"></i>
+            <span class="material-symbols-outlined text-blue-600">directions_run</span>
             <h1 class="font-bold text-base text-slate-800">マット運動 AI分析</h1>
         </div>
         
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
-            <div class="loader" style="width: 14px; height: 14px; border-width: 2px;"></div>
+            <div class="loader"></div>
             AI準備中...
         </div>
     </header>
 
-    <!-- Main Content Layout (2 Rows) -->
-    <main class="flex-1 grid grid-rows-2 gap-3 p-3 h-[calc(100vh-55px)]">
+    <!-- Main Content Layout -->
+    <!-- PC/タブレット横向きは左右2分割、スマホ縦向きは上下2分割に自動可変し、スクロールを防止 -->
+    <main class="flex-1 grid grid-cols-1 md:grid-cols-2 grid-rows-2 md:grid-rows-1 gap-3 p-3 min-h-0">
 
-        <!-- UPPER PANEL: 模範動画 (スプレッドシート連動) -->
-        <section class="bg-white rounded-lg p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm">
-            <div class="flex items-center gap-3 mb-2">
-                <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap">👀 見本</span>
-                <!-- スプレッドシートから読み込んだ技がここに入ります -->
+        <!-- PANEL 1: 模範動画 -->
+        <section class="bg-white rounded-lg p-2 md:p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm">
+            <div class="flex items-center gap-2 mb-2 shrink-0">
+                <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap flex items-center gap-1">
+                    <span class="material-symbols-outlined" style="font-size: 14px;">menu_book</span> 見本
+                </span>
                 <select id="taskSelect" onchange="changeModelVideo()" class="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
                     <option value="">データを読み込み中...</option>
                 </select>
@@ -91,44 +107,46 @@
 
             <!-- Model Video Container -->
             <div class="flex-1 video-box bg-slate-900">
-                <!-- Googleドライブの動画を表示するためのiframe -->
-                <iframe id="modelVideo" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                <iframe id="modelVideo" src="" class="w-full h-full border-none" allow="autoplay; encrypted-media" allowfullscreen></iframe>
                 <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center text-slate-400 text-sm font-bold pointer-events-none">
                     上のメニューから技を選んでください
                 </div>
             </div>
         </section>
 
-        <!-- LOWER PANEL: 自分の動画とモーションキャプチャ -->
-        <section class="bg-white rounded-lg p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm relative">
-            <div class="flex items-center justify-between gap-2 mb-2">
-                <div class="flex items-center gap-3">
-                    <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap">📸 自分の動き</span>
+        <!-- PANEL 2: 自分の動画とモーションキャプチャ -->
+        <section class="bg-white rounded-lg p-2 md:p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm relative">
+            <div class="flex items-center justify-between gap-2 mb-2 shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap flex items-center gap-1">
+                        <span class="material-symbols-outlined" style="font-size: 14px;">person_play</span> 自分の動き
+                    </span>
                     
                     <label id="uploadLabel" class="cursor-not-allowed bg-slate-300 text-slate-500 text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors">
-                        <i class="fa-solid fa-video"></i> 動画を選ぶ
+                        <span class="material-symbols-outlined" style="font-size: 16px;">upload_file</span> 動画を選ぶ
                         <input type="file" id="videoUpload" accept="video/*" class="hidden" disabled>
                     </label>
                 </div>
-                <div class="text-xs text-slate-500 font-bold">
-                    ※動画を入れると自動で骨格が出ます
+                <div class="hidden sm:block text-xs text-slate-500 font-bold">
+                    ※動画にAI骨格が重なります
                 </div>
             </div>
 
             <!-- Student Video & Motion Capture Canvas Container -->
-            <div class="flex-1 video-box bg-black cursor-pointer" id="studentBox" onclick="togglePlayPause()" title="クリックで再生/一時停止">
-                <!-- 実際の動画要素は非表示にし、Canvasに映像と骨格を両方描画します -->
+            <div class="flex-1 video-box bg-black cursor-pointer group" id="studentBox" onclick="togglePlayPause()" title="クリックで再生/一時停止">
+                <!-- 映像出力用の非表示Videoタグ -->
                 <video id="studentVideo" loop muted playsinline class="hidden"></video>
+                <!-- AI描画と映像を合成するCanvas -->
                 <canvas id="studentCanvas" class="hidden w-full h-full object-contain"></canvas>
                 
                 <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none gap-2">
-                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-1 text-slate-300"></i>
-                    AIの準備が完了したら動画を選んでください
+                    <span class="material-symbols-outlined text-4xl mb-1 text-slate-300">cloud_upload</span>
+                    AIの準備完了後に動画を選んでください
                 </div>
 
                 <!-- 再生/一時停止アイコンのフィードバック -->
-                <div id="playPauseIcon" class="absolute inset-0 flex items-center justify-center text-white text-6xl opacity-0 pointer-events-none transition-opacity duration-300">
-                    <i class="fa-solid fa-play drop-shadow-lg"></i>
+                <div id="playPauseIcon" class="absolute inset-0 flex items-center justify-center text-white opacity-0 pointer-events-none transition-opacity duration-300">
+                    <span class="material-symbols-outlined drop-shadow-lg" style="font-size: 4rem;">play_arrow</span>
                 </div>
             </div>
         </section>
@@ -136,20 +154,23 @@
     </main>
 
     <script>
-        // === スプレッドシート連携処理 (GAS環境用) ===
+        // === スプレッドシート連携処理 ===
         let taskDataList = [];
 
         window.addEventListener('DOMContentLoaded', () => {
             initMediaPipe(); // AI初期化開始
             
-            // GAS環境で動いている場合は google.script.run を呼び出す
+            // GAS環境（Apps Script）で動作しているか、GitHub等の外部サーバーかを自動判定
             if (typeof google !== 'undefined' && google.script) {
+                // GAS環境：スプレッドシートから直接取得
                 google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
             } else {
-                // ローカルやプレビュー環境用のダミーデータ（動作確認用）
+                // GitHub Pages等環境：動作確認用のサンプルデータを表示
+                // ※将来的にGitHubからスプレッドシートのデータを読みたい場合は、GASを「Webアプリ」として公開し fetch() で取得する仕組みに変更します。
                 populateSelect([
                     { name: "開脚前転（サンプル）", url: "https://www.youtube.com/embed/dQw4w9WgXcQ" },
-                    { name: "後転（サンプル）", url: "https://www.youtube.com/embed/tgbNymZ7vqY" }
+                    { name: "後転（サンプル）", url: "https://www.youtube.com/embed/tgbNymZ7vqY" },
+                    { name: "倒立前転（サンプル）", url: "https://www.youtube.com/embed/39udgGPyYMg" }
                 ]);
             }
         });
@@ -179,7 +200,7 @@
             }
             
             let url = taskDataList[select.value].url;
-            // Googleドライブのリンクを埋め込み用プレビューURLに変換
+            // Googleドライブの共有リンクを埋め込み用(preview)に変換
             if (url.includes("view?usp=sharing") || url.includes("view?usp=drivesdk")) {
                 url = url.replace(/\/view.*/, "/preview");
             }
@@ -222,7 +243,7 @@
                 
                 // UIを有効化
                 const aiStatus = document.getElementById('aiStatus');
-                aiStatus.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i> AI準備完了';
+                aiStatus.innerHTML = '<span class="material-symbols-outlined text-emerald-500" style="font-size:16px;">check_circle</span> AI準備完了';
                 aiStatus.classList.remove('bg-slate-100', 'text-slate-500');
                 aiStatus.classList.add('bg-emerald-50', 'text-emerald-700');
                 
@@ -230,11 +251,11 @@
                 uploadLabel.classList.add('cursor-pointer', 'bg-emerald-600', 'hover:bg-emerald-700', 'text-white');
                 videoUpload.disabled = false;
                 
-                studentPlaceholder.innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-3xl mb-1 text-slate-300"></i>自分の動画をアップロードしてください';
+                studentPlaceholder.innerHTML = '<span class="material-symbols-outlined text-4xl mb-1 text-slate-300">cloud_upload</span>自分の動画を選択してください';
 
             } catch (error) {
                 console.error("AI Initialization Error:", error);
-                document.getElementById('aiStatus').innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i> AI読込エラー';
+                document.getElementById('aiStatus').innerHTML = '<span class="material-symbols-outlined text-red-500" style="font-size:16px;">error</span> AI読込エラー';
             }
         }
 
@@ -249,7 +270,7 @@
             studentPlaceholder.classList.add('hidden');
             studentCanvas.classList.remove('hidden');
             
-            // 動画の準備ができたら再生＆解析ループ開始
+            // 動画のメタデータが読み込まれたらキャンバスサイズを合わせる
             studentVideo.onloadedmetadata = () => {
                 studentCanvas.width = studentVideo.videoWidth;
                 studentCanvas.height = studentVideo.videoHeight;
@@ -262,15 +283,14 @@
         async function processVideoLoop() {
             if (!studentVideo.paused && !studentVideo.ended && !isProcessingFrame) {
                 isProcessingFrame = true;
-                // MediaPipeへ現在の動画フレームを送信（解析完了すると onPoseResults が呼ばれる）
+                // 現在の映像フレームをMediaPipeへ送信
                 await poseModel.send({ image: studentVideo });
                 isProcessingFrame = false;
             }
-            // 停止中でも映像を描画し続けるためループは止めない
             requestAnimationFrame(processVideoLoop);
         }
 
-        // AIの解析結果が返ってきたときの描画処理
+        // AIの解析結果が返ってきたときの描画処理 (動画フレーム + 骨格)
         function onPoseResults(results) {
             ctx.save();
             ctx.clearRect(0, 0, studentCanvas.width, studentCanvas.height);
@@ -280,10 +300,8 @@
             
             // 2. 骨格が検出されていればオーバーレイ描画
             if (results.poseLandmarks) {
-                // 関節同士を結ぶ線（ワイヤー）
                 drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, 
-                             { color: '#00FF00', lineWidth: 4 }); // 鮮やかな緑色
-                // 関節の点
+                             { color: '#00FF00', lineWidth: 4 }); // 緑色の線
                 drawLandmarks(ctx, results.poseLandmarks, 
                             { color: '#FF0000', fillColor: '#FFFFFF', lineWidth: 2, radius: 4 }); // 赤枠・白塗りの点
             }
@@ -298,13 +316,13 @@
             
             if (studentVideo.paused) {
                 studentVideo.play();
-                icon.innerHTML = '<i class="fa-solid fa-play drop-shadow-lg"></i>';
+                icon.innerHTML = '<span class="material-symbols-outlined drop-shadow-lg" style="font-size: 4rem;">play_arrow</span>';
             } else {
                 studentVideo.pause();
-                icon.innerHTML = '<i class="fa-solid fa-pause drop-shadow-lg"></i>';
+                icon.innerHTML = '<span class="material-symbols-outlined drop-shadow-lg" style="font-size: 4rem;">pause</span>';
             }
             
-            // アイコンをフワッと表示して消すアニメーション
+            // アイコンをフワッと表示して消す
             icon.classList.remove('opacity-0');
             setTimeout(() => {
                 icon.classList.add('opacity-0');
