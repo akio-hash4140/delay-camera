@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>マット運動 ストロボ分析ツール</title>
+    <title>マット運動 モーションキャプチャ分析</title>
 
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -25,6 +25,11 @@
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
+    <!-- MediaPipe Pose JS (Local Client Execution) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
     <style>
         .video-box {
             position: relative;
@@ -38,16 +43,16 @@
             overflow: hidden;
         }
 
-        .video-box iframe, .video-box video, .video-box canvas {
-            width: 100%;
-            height: 100%;
+        .video-box iframe, .video-box canvas {
+            max-width: 100%;
+            max-height: 100%;
             object-fit: contain;
         }
         
         /* ローディングアニメーション用 */
         .loader {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
+            border-top: 4px solid #3b82f6; /* blue-500 */
             border-radius: 50%;
             width: 24px;
             height: 24px;
@@ -62,13 +67,13 @@
     <header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm">
         <div class="flex items-center space-x-2">
             <i class="fa-solid fa-person-running text-blue-600 text-xl"></i>
-            <h1 class="font-bold text-base text-slate-800">マット運動 ストロボ分析</h1>
+            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析</h1>
         </div>
-
-        <!-- Screenshot Button -->
-        <button onclick="captureStrobeScreen()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform">
-            <i class="fa-solid fa-camera"></i> 画像として保存
-        </button>
+        
+        <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+            <div class="loader" style="width: 14px; height: 14px; border-width: 2px;"></div>
+            AI準備中...
+        </div>
     </header>
 
     <!-- Main Content Layout (2 Rows) -->
@@ -94,55 +99,49 @@
             </div>
         </section>
 
-        <!-- LOWER PANEL: 自分の動画とストロボ生成 -->
+        <!-- LOWER PANEL: 自分の動画とモーションキャプチャ -->
         <section class="bg-white rounded-lg p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm relative">
             <div class="flex items-center justify-between gap-2 mb-2">
                 <div class="flex items-center gap-3">
                     <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap">📸 自分の動き</span>
                     
-                    <label class="cursor-pointer bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors">
+                    <label id="uploadLabel" class="cursor-not-allowed bg-slate-300 text-slate-500 text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors">
                         <i class="fa-solid fa-video"></i> 動画を選ぶ
-                        <input type="file" id="videoUpload" accept="video/*" class="hidden">
+                        <input type="file" id="videoUpload" accept="video/*" class="hidden" disabled>
                     </label>
                 </div>
-
-                <!-- 連続写真生成ボタン -->
-                <button id="generateBtn" disabled onclick="generateStrobe()" class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-1.5 rounded flex items-center gap-1.5 shadow-sm transition-colors">
-                    <i class="fa-solid fa-layer-group"></i> 連続写真をつくる
-                </button>
+                <div class="text-xs text-slate-500 font-bold">
+                    ※動画を入れると自動で骨格が出ます
+                </div>
             </div>
 
-            <!-- Student Video & Strobe Canvas Container -->
-            <div class="flex-1 video-box bg-black" id="studentBox">
-                <video id="studentVideo" playsinline controls class="hidden"></video>
-                <canvas id="strobeCanvas" class="hidden"></canvas>
+            <!-- Student Video & Motion Capture Canvas Container -->
+            <div class="flex-1 video-box bg-black cursor-pointer" id="studentBox" onclick="togglePlayPause()" title="クリックで再生/一時停止">
+                <!-- 実際の動画要素は非表示にし、Canvasに映像と骨格を両方描画します -->
+                <video id="studentVideo" loop muted playsinline class="hidden"></video>
+                <canvas id="studentCanvas" class="hidden w-full h-full object-contain"></canvas>
                 
                 <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none gap-2">
                     <i class="fa-solid fa-cloud-arrow-up text-3xl mb-1 text-slate-300"></i>
-                    自分の動画をアップロードしてください
+                    AIの準備が完了したら動画を選んでください
                 </div>
 
-                <!-- ローディング表示 -->
-                <div id="loadingOverlay" class="absolute inset-0 bg-black/70 flex flex-col items-center justify-center text-white hidden z-10">
-                    <div class="loader mb-2"></div>
-                    <span class="text-sm font-bold">画像を合成中...</span>
+                <!-- 再生/一時停止アイコンのフィードバック -->
+                <div id="playPauseIcon" class="absolute inset-0 flex items-center justify-center text-white text-6xl opacity-0 pointer-events-none transition-opacity duration-300">
+                    <i class="fa-solid fa-play drop-shadow-lg"></i>
                 </div>
             </div>
         </section>
 
     </main>
 
-    <!-- Simple Toast -->
-    <div id="toast" class="fixed bottom-4 right-4 bg-slate-800 text-white text-sm px-4 py-3 rounded shadow-lg transition-all transform translate-y-20 opacity-0 pointer-events-none z-50 flex items-center gap-2">
-        <i class="fa-solid fa-circle-info text-blue-400"></i>
-        <span id="toastMsg">メッセージ</span>
-    </div>
-
     <script>
         // === スプレッドシート連携処理 (GAS環境用) ===
         let taskDataList = [];
 
         window.addEventListener('DOMContentLoaded', () => {
+            initMediaPipe(); // AI初期化開始
+            
             // GAS環境で動いている場合は google.script.run を呼び出す
             if (typeof google !== 'undefined' && google.script) {
                 google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
@@ -180,7 +179,6 @@
             }
             
             let url = taskDataList[select.value].url;
-            
             // Googleドライブのリンクを埋め込み用プレビューURLに変換
             if (url.includes("view?usp=sharing") || url.includes("view?usp=drivesdk")) {
                 url = url.replace(/\/view.*/, "/preview");
@@ -190,109 +188,127 @@
             placeholder.classList.add('hidden');
         }
 
-        // === 生徒動画 ＆ ストロボ生成処理 ===
+        // === AI (MediaPipe Pose) 処理 ===
+        let poseModel;
+        let isAiReady = false;
+        let isProcessingFrame = false;
+        
         const videoUpload = document.getElementById('videoUpload');
+        const uploadLabel = document.getElementById('uploadLabel');
         const studentVideo = document.getElementById('studentVideo');
-        const strobeCanvas = document.getElementById('strobeCanvas');
-        const ctx = strobeCanvas.getContext('2d');
-        const generateBtn = document.getElementById('generateBtn');
+        const studentCanvas = document.getElementById('studentCanvas');
+        const ctx = studentCanvas.getContext('2d');
         const studentPlaceholder = document.getElementById('studentPlaceholder');
-        const loadingOverlay = document.getElementById('loadingOverlay');
 
-        // 動画ファイルの読み込み
+        async function initMediaPipe() {
+            try {
+                poseModel = new Pose({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+                });
+                
+                poseModel.setOptions({
+                    modelComplexity: 1, // 0:軽量, 1:標準, 2:高精度
+                    smoothLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                
+                poseModel.onResults(onPoseResults);
+                
+                // AIモデルを事前にウォームアップ（初期化）
+                await poseModel.initialize();
+                
+                isAiReady = true;
+                
+                // UIを有効化
+                const aiStatus = document.getElementById('aiStatus');
+                aiStatus.innerHTML = '<i class="fa-solid fa-check text-emerald-500"></i> AI準備完了';
+                aiStatus.classList.remove('bg-slate-100', 'text-slate-500');
+                aiStatus.classList.add('bg-emerald-50', 'text-emerald-700');
+                
+                uploadLabel.classList.remove('cursor-not-allowed', 'bg-slate-300', 'text-slate-500');
+                uploadLabel.classList.add('cursor-pointer', 'bg-emerald-600', 'hover:bg-emerald-700', 'text-white');
+                videoUpload.disabled = false;
+                
+                studentPlaceholder.innerHTML = '<i class="fa-solid fa-cloud-arrow-up text-3xl mb-1 text-slate-300"></i>自分の動画をアップロードしてください';
+
+            } catch (error) {
+                console.error("AI Initialization Error:", error);
+                document.getElementById('aiStatus').innerHTML = '<i class="fa-solid fa-triangle-exclamation text-red-500"></i> AI読込エラー';
+            }
+        }
+
+        // 動画ファイルが選ばれたときの処理
         videoUpload.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (!file) return;
+            if (!file || !isAiReady) return;
             
             const url = URL.createObjectURL(file);
             studentVideo.src = url;
             
             studentPlaceholder.classList.add('hidden');
-            strobeCanvas.classList.add('hidden');
-            studentVideo.classList.remove('hidden');
+            studentCanvas.classList.remove('hidden');
             
-            // メタデータが読み込まれたらボタンを有効化
+            // 動画の準備ができたら再生＆解析ループ開始
             studentVideo.onloadedmetadata = () => {
-                generateBtn.disabled = false;
-                strobeCanvas.width = studentVideo.videoWidth;
-                strobeCanvas.height = studentVideo.videoHeight;
+                studentCanvas.width = studentVideo.videoWidth;
+                studentCanvas.height = studentVideo.videoHeight;
+                studentVideo.play();
+                requestAnimationFrame(processVideoLoop);
             };
         });
 
-        // ストロボ（連続写真）の生成
-        async function generateStrobe() {
-            if (studentVideo.duration <= 0) return;
-            
-            // UIの切り替え
-            generateBtn.disabled = true;
-            loadingOverlay.classList.remove('hidden');
-            studentVideo.classList.add('hidden');
-            strobeCanvas.classList.remove('hidden');
-            
-            // キャンバスを黒でクリア
-            ctx.fillStyle = "black";
-            ctx.fillRect(0, 0, strobeCanvas.width, strobeCanvas.height);
-            
-            const numFrames = 6; // 抽出するコマ数
-            const interval = studentVideo.duration / numFrames;
-            
-            studentVideo.pause();
-            
-            for (let i = 0; i < numFrames; i++) {
-                studentVideo.currentTime = interval * i;
-                
-                // 動画のシーク（指定時間への移動）が完了するのを待つ
-                await new Promise(resolve => {
-                    studentVideo.addEventListener('seeked', function onSeeked() {
-                        studentVideo.removeEventListener('seeked', onSeeked);
-                        // 描画の安定化のため少しだけ待機
-                        setTimeout(resolve, 50);
-                    });
-                });
-                
-                // 前のコマと綺麗に重ねるための透過設定
-                ctx.globalAlpha = i === 0 ? 1.0 : 0.6; 
-                ctx.globalCompositeOperation = i === 0 ? 'source-over' : 'screen';
-                
-                ctx.drawImage(studentVideo, 0, 0, strobeCanvas.width, strobeCanvas.height);
+        // 動画のフレームごとにAI解析へ投げるループ
+        async function processVideoLoop() {
+            if (!studentVideo.paused && !studentVideo.ended && !isProcessingFrame) {
+                isProcessingFrame = true;
+                // MediaPipeへ現在の動画フレームを送信（解析完了すると onPoseResults が呼ばれる）
+                await poseModel.send({ image: studentVideo });
+                isProcessingFrame = false;
             }
-            
-            // 通常の描画モードに戻す
-            ctx.globalAlpha = 1.0;
-            ctx.globalCompositeOperation = 'source-over';
-            
-            // 処理完了
-            loadingOverlay.classList.add('hidden');
-            generateBtn.disabled = false;
-            showToast("連続写真を生成しました！");
+            // 停止中でも映像を描画し続けるためループは止めない
+            requestAnimationFrame(processVideoLoop);
         }
 
-        // === 画面保存（スクショ）処理 ===
-        function captureStrobeScreen() {
-            // キャンバスが表示されていなければエラー
-            if (strobeCanvas.classList.contains('hidden')) {
-                showToast("先に「連続写真」を作成してください");
-                return;
-            }
-
-            const imageURL = strobeCanvas.toDataURL('image/png');
-            const link = document.createElement('a');
-            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-            link.download = `mat_strobe_${dateStr}.png`;
-            link.href = imageURL;
-            link.click();
+        // AIの解析結果が返ってきたときの描画処理
+        function onPoseResults(results) {
+            ctx.save();
+            ctx.clearRect(0, 0, studentCanvas.width, studentCanvas.height);
             
-            showToast("📸 画像をダウンロードしました");
+            // 1. 元の動画フレームを描画
+            ctx.drawImage(results.image, 0, 0, studentCanvas.width, studentCanvas.height);
+            
+            // 2. 骨格が検出されていればオーバーレイ描画
+            if (results.poseLandmarks) {
+                // 関節同士を結ぶ線（ワイヤー）
+                drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, 
+                             { color: '#00FF00', lineWidth: 4 }); // 鮮やかな緑色
+                // 関節の点
+                drawLandmarks(ctx, results.poseLandmarks, 
+                            { color: '#FF0000', fillColor: '#FFFFFF', lineWidth: 2, radius: 4 }); // 赤枠・白塗りの点
+            }
+            ctx.restore();
         }
 
-        // === トースト通知 ===
-        function showToast(msg) {
-            const toast = document.getElementById('toast');
-            document.getElementById('toastMsg').innerText = msg;
-            toast.classList.remove('translate-y-20', 'opacity-0', 'pointer-events-none');
+        // 画面クリックで再生・一時停止を切り替える
+        function togglePlayPause() {
+            if (!studentVideo.src) return;
+            
+            const icon = document.getElementById('playPauseIcon');
+            
+            if (studentVideo.paused) {
+                studentVideo.play();
+                icon.innerHTML = '<i class="fa-solid fa-play drop-shadow-lg"></i>';
+            } else {
+                studentVideo.pause();
+                icon.innerHTML = '<i class="fa-solid fa-pause drop-shadow-lg"></i>';
+            }
+            
+            // アイコンをフワッと表示して消すアニメーション
+            icon.classList.remove('opacity-0');
             setTimeout(() => {
-                toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
-            }, 3000);
+                icon.classList.add('opacity-0');
+            }, 600);
         }
     </script>
 </body>
