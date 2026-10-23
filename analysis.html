@@ -30,25 +30,11 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
 
     <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100dvh;
-            overflow: hidden;
-        }
-
-        .material-symbols-outlined {
-            vertical-align: middle;
-        }
-
+        html, body { margin: 0; padding: 0; width: 100vw; height: 100dvh; overflow: hidden; }
+        .material-symbols-outlined { vertical-align: middle; }
         .loader {
-            border: 3px solid #e2e8f0;
-            border-top: 3px solid #3b82f6;
-            border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            animation: spin 1s linear infinite;
+            border: 3px solid #e2e8f0; border-top: 3px solid #3b82f6;
+            border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -61,7 +47,6 @@
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
             <h1 class="font-bold text-base text-slate-800">マット運動 AI分析</h1>
         </div>
-        
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
             <span id="aiStatusText">AI準備中...</span>
@@ -71,19 +56,22 @@
     <!-- Main Content Layout -->
     <main class="flex-1 grid grid-cols-1 md:grid-cols-2 grid-rows-2 md:grid-rows-1 gap-3 p-3 min-h-0">
 
-        <!-- PANEL 1: 模範動画 -->
+        <!-- PANEL 1: 模範動画/画像 -->
         <section class="bg-white rounded-lg p-2 md:p-3 border border-slate-200 flex flex-col min-h-0 shadow-sm relative">
             <div class="flex items-center gap-2 mb-2 shrink-0">
                 <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap flex items-center gap-1">
                     <span class="material-symbols-outlined" style="font-size: 14px;">menu_book</span> 見本
                 </span>
-                <select id="taskSelect" onchange="changeModelVideo()" class="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
+                <select id="taskSelect" onchange="changeModelMedia()" class="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
                     <option value="">データを読み込み中...</option>
                 </select>
             </div>
 
             <div class="flex-1 bg-black rounded overflow-hidden relative group">
-                <video id="modelVideo" controls crossorigin="anonymous" playsinline class="absolute inset-0 w-full h-full object-contain"></video>
+                <!-- ★変更: videoとimgを両方用意し、初期はhidden -->
+                <video id="modelVideo" controls crossorigin="anonymous" playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
+                <img id="modelImage" crossorigin="anonymous" class="absolute inset-0 w-full h-full object-contain hidden">
+                
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"></canvas>
                 
                 <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-bold pointer-events-none z-20">
@@ -99,7 +87,6 @@
                     <span class="bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded text-xs whitespace-nowrap flex items-center gap-1">
                         <span class="material-symbols-outlined" style="font-size: 14px;">person_play</span> 自分の動き
                     </span>
-                    
                     <label id="uploadLabel" class="cursor-not-allowed bg-slate-300 text-slate-500 text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition-colors">
                         <span class="material-symbols-outlined" style="font-size: 16px;">upload_file</span> 動画を選ぶ
                         <input type="file" id="videoUpload" accept="video/*" class="hidden" disabled>
@@ -124,8 +111,12 @@
     </main>
 
     <script>
+        // ★ここに既存のGASアプリの「ウェブアプリのURL」を貼り付けます
+        // 例: https://script.google.com/macros/s/AKfycb.../exec
+        const GAS_WEB_APP_URL = "https://script.google.com/a/macros/iizuna.ed.jp/s/AKfycby0G8iG3ps1uGQIU6o6wz0zzN16YI4DItFjmpNGD7Wp9s9zhOnXUyTcjUBB7khvg2Ug/exec";
+
         // DOM要素
-        let modelVideo, studentVideo, videoUpload;
+        let modelVideo, modelImage, studentVideo, videoUpload;
         let taskDataList = [];
 
         // AI関連
@@ -135,25 +126,36 @@
         let isProcessingModel = false, isProcessingStudent = false;
 
         window.addEventListener('DOMContentLoaded', () => {
-            // 要素の取得
             modelVideo = document.getElementById('modelVideo');
+            modelImage = document.getElementById('modelImage'); // 追加
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
-            // 1. スプレッドシート連携
-            if (typeof google !== 'undefined' && google.script) {
-                google.script.run.withSuccessHandler(populateSelect).getTaskDataForAnalysis();
-            } else {
-                populateSelect([
-                    { name: "開脚前転（サンプル）", url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" },
-                    { name: "後転（サンプル）", url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4" }
-                ]);
-            }
+            // 1. GASのAPIからデータを取得
+            fetchTaskDataFromGAS();
 
             // 2. AIの初期化開始
             initAI();
             setupEventListeners();
         });
+
+        // ★追加: GASからデータを取得する関数
+        async function fetchTaskDataFromGAS() {
+            const select = document.getElementById("taskSelect");
+            try {
+                // URLの末尾に ?api=getTasks を付けてリクエスト
+                const response = await fetch(`${GAS_WEB_APP_URL}?api=getTasks`);
+                if (!response.ok) throw new Error('ネットワークエラー');
+                
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                
+                populateSelect(data);
+            } catch (error) {
+                console.error("データ取得失敗:", error);
+                select.innerHTML = '<option value="">データの取得に失敗しました</option>';
+            }
+        }
 
         function populateSelect(data) {
             taskDataList = data;
@@ -167,53 +169,85 @@
             });
         }
 
-        function getDirectVideoUrl(url) {
+        // 画像・動画両方に対応できるDrive直リンク生成
+        function getDirectMediaUrl(url) {
             if (!url) return "";
             const driveMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
             if (driveMatch && driveMatch[1]) {
-                return `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+                return `https://drive.google.com/uc?id=${driveMatch[1]}`;
             }
             return url;
         }
 
-        function changeModelVideo() {
+        // ★変更: 動画と画像の切り替えロジック
+        function changeModelMedia() {
             const select = document.getElementById("taskSelect");
             const placeholder = document.getElementById("modelPlaceholder");
+            const canvas = document.getElementById("modelCanvas");
+            const ctx = canvas.getContext('2d');
+            
+            // リセット
+            modelVideo.pause();
+            modelVideo.removeAttribute('src');
+            modelVideo.load();
+            modelImage.removeAttribute('src');
+            
+            modelVideo.classList.add('hidden');
+            modelImage.classList.add('hidden');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            lastPoseModel = null;
             
             if (select.value === "") {
-                modelVideo.src = "";
                 placeholder.classList.remove('hidden');
                 return;
             }
             
-            modelVideo.src = getDirectVideoUrl(taskDataList[select.value].url);
+            const task = taskDataList[select.value];
+            const directUrl = getDirectMediaUrl(task.url);
             placeholder.classList.add('hidden');
             
-            modelVideo.onloadedmetadata = () => {
-                document.getElementById("modelCanvas").width = modelVideo.videoWidth;
-                document.getElementById("modelCanvas").height = modelVideo.videoHeight;
-            };
+            if (task.type === 'image') {
+                modelImage.src = directUrl;
+                modelImage.classList.remove('hidden');
+                
+                // 画像読み込み完了時に1回だけAI解析を実行
+                modelImage.onload = async () => {
+                    canvas.width = modelImage.naturalWidth;
+                    canvas.height = modelImage.naturalHeight;
+                    if (isAiReady) {
+                        await poseModelModel.send({ image: modelImage });
+                    }
+                };
+            } else {
+                modelVideo.src = directUrl;
+                modelVideo.classList.remove('hidden');
+                
+                modelVideo.onloadedmetadata = () => {
+                    canvas.width = modelVideo.videoWidth;
+                    canvas.height = modelVideo.videoHeight;
+                };
+            }
         }
 
         async function initAI() {
             try {
                 const config = {
-                    modelComplexity: 1, 
-                    smoothLandmarks: true,
-                    minDetectionConfidence: 0.5,
-                    minTrackingConfidence: 0.5
+                    modelComplexity: 1, smoothLandmarks: true,
+                    minDetectionConfidence: 0.5, minTrackingConfidence: 0.5
                 };
 
-                // 【修正ポイント】AIを「順番に」起動し、ブラウザのパニック（競合）を防ぐ
                 document.getElementById('aiStatusText').innerText = 'AI準備中 (1/2)...';
                 
                 poseModelModel = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
                 poseModelModel.setOptions(config);
                 poseModelModel.onResults((results) => {
                     lastPoseModel = results.poseLandmarks || null;
-                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, modelVideo.paused);
+                    // ★変更: 画像の場合は常に一時停止(角度表示)扱いとする
+                    const isImage = !modelImage.classList.contains('hidden');
+                    const isPaused = isImage ? true : modelVideo.paused;
+                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isPaused);
                 });
-                await poseModelModel.initialize(); // 1つ目の起動完了を完全に待つ
+                await poseModelModel.initialize();
 
                 document.getElementById('aiStatusText').innerText = 'AI準備中 (2/2)...';
                 
@@ -223,11 +257,10 @@
                     lastPoseStudent = results.poseLandmarks || null;
                     drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
                 });
-                await poseModelStudent.initialize(); // 2つ目の起動完了を完全に待つ
+                await poseModelStudent.initialize();
 
                 isAiReady = true;
                 
-                // 起動成功時のUI切り替え
                 const aiStatus = document.getElementById('aiStatus');
                 aiStatus.innerHTML = '<span class="material-symbols-outlined text-emerald-500" style="font-size:16px;">check_circle</span> AI準備完了';
                 aiStatus.classList.replace('bg-slate-100', 'bg-emerald-50');
@@ -242,14 +275,12 @@
 
             } catch (error) {
                 console.error("AI Initialization Error:", error);
-                // エラー内容を画面に出力して原因を特定しやすくする
                 document.getElementById('aiStatus').innerHTML = `<span class="material-symbols-outlined text-red-500" style="font-size:16px;">error</span> エラー: ${error.message}`;
                 document.getElementById('aiStatus').classList.replace('bg-slate-100', 'bg-red-50');
                 document.getElementById('aiStatus').classList.replace('text-slate-500', 'text-red-700');
             }
         }
 
-        // --- 動画のイベントリスナー設定 ---
         function setupEventListeners() {
             modelVideo.addEventListener('play', () => { requestAnimationFrame(processModelLoop); });
             modelVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); });
@@ -298,7 +329,7 @@
             }
         }
 
-        // --- ★描画＆角度計算関数★ ---
+        // --- 描画＆角度計算関数 (既存のまま変更なし) ---
         const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
         const customConnections = [
             [0, 11], [0, 12], [11, 12], [23, 24], [11, 23], [12, 24], 
@@ -314,14 +345,13 @@
 
         function drawSkeleton(canvas, poseLandmarks, isPaused) {
             const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height); // キャンバスを透明にクリア
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             if (!poseLandmarks) return;
 
             const width = canvas.width;
             const height = canvas.height;
 
-            // 1. 太い線を引く
             ctx.lineWidth = 8;
             ctx.strokeStyle = '#00FF00';
             customConnections.forEach(([i, j]) => {
@@ -335,7 +365,6 @@
                 }
             });
 
-            // 2. 大きな関節マーカーを描画
             targetJoints.forEach(i => {
                 const p = poseLandmarks[i];
                 if (p.visibility > 0.5) {
@@ -349,13 +378,12 @@
                 }
             });
 
-            // 3. 一時停止中なら「角度」を描画
             if (isPaused) {
                 const angleTargets = [
-                    { p1: 23, p2: 11, p3: 13 }, { p1: 24, p2: 12, p3: 14 }, // 肩
-                    { p1: 11, p2: 13, p3: 15 }, { p1: 12, p2: 14, p3: 16 }, // 肘
-                    { p1: 11, p2: 23, p3: 25 }, { p1: 12, p2: 24, p3: 26 }, // 腰
-                    { p1: 23, p2: 25, p3: 27 }, { p1: 24, p2: 26, p3: 28 }  // 膝
+                    { p1: 23, p2: 11, p3: 13 }, { p1: 24, p2: 12, p3: 14 },
+                    { p1: 11, p2: 13, p3: 15 }, { p1: 12, p2: 14, p3: 16 },
+                    { p1: 11, p2: 23, p3: 25 }, { p1: 12, p2: 24, p3: 26 },
+                    { p1: 23, p2: 25, p3: 27 }, { p1: 24, p2: 26, p3: 28 } 
                 ];
 
                 ctx.font = 'bold 36px Arial';
@@ -372,7 +400,6 @@
                         const x = pt2.x * width;
                         const y = pt2.y * height - 35; 
 
-                        // 黒フチドリ＋黄色文字
                         ctx.strokeStyle = '#000000';
                         ctx.lineWidth = 6;
                         ctx.strokeText(angle + '°', x, y);
