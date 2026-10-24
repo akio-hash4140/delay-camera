@@ -69,8 +69,8 @@
 
             <div class="flex-1 bg-black rounded overflow-hidden relative group">
                 <!-- ★変更: videoとimgを両方用意し、初期はhidden -->
-                <video id="modelVideo" controls crossorigin="anonymous" playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
-                <img id="modelImage" crossorigin="anonymous" class="absolute inset-0 w-full h-full object-contain hidden">
+                <video id="modelVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
+<img id="modelImage" class="absolute inset-0 w-full h-full object-contain hidden">
                 
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"></canvas>
                 
@@ -177,24 +177,7 @@
             }
         }
 
-        // ★修正: Google Driveのセキュリティを回避するURL生成ロジック
-        function getDirectMediaUrl(url, type) {
-            if (!url) return "";
-            const driveMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-            if (driveMatch && driveMatch[1]) {
-                const id = driveMatch[1];
-                if (type === 'image') {
-                    // 画像の場合: サムネイルAPIを使うとCORSエラーを回避しやすい（サイズw1200で高画質化）
-                    return `https://drive.google.com/thumbnail?id=${id}&sz=w1200`;
-                } else {
-                    // 動画の場合: ダウンロード用エンドポイントを使用
-                    return `https://drive.google.com/uc?export=download&id=${id}`;
-                }
-            }
-            return url;
-        }
-
-        // ★修正: 読み込みエラー時の処理を追加した切り替えロジック
+        // ★修正: GAS側ですでに変換済みなので、そのまま表示するだけ
         function changeModelMedia() {
             const select = document.getElementById("taskSelect");
             const placeholder = document.getElementById("modelPlaceholder");
@@ -219,22 +202,13 @@
             }
             
             const task = taskDataList[select.value];
-            // ★変更: typeを引数に渡す
-            const directUrl = getDirectMediaUrl(task.url, task.type);
             placeholder.classList.add('hidden');
             
             if (task.type === 'image') {
-                modelImage.src = directUrl;
+                // GASから送られてきたBase64データをそのままセット
+                modelImage.src = task.url;
                 modelImage.classList.remove('hidden');
                 
-                // ★追加: 画像読み込みエラー時の処理
-                modelImage.onerror = () => {
-                    modelImage.classList.add('hidden');
-                    placeholder.classList.remove('hidden');
-                    placeholder.innerHTML = `<span class="text-red-400">画像の読み込みに失敗しました。<br>Driveの共有設定を確認してください。</span>`;
-                };
-
-                // 画像読み込み完了時に1回だけAI解析を実行
                 modelImage.onload = async () => {
                     canvas.width = modelImage.naturalWidth;
                     canvas.height = modelImage.naturalHeight;
@@ -247,16 +221,10 @@
                     }
                 };
             } else {
-                modelVideo.src = directUrl;
+                // 動画の場合
+                modelVideo.src = task.url;
                 modelVideo.classList.remove('hidden');
                 
-                // ★追加: 動画読み込みエラー時の処理
-                modelVideo.onerror = () => {
-                    modelVideo.classList.add('hidden');
-                    placeholder.classList.remove('hidden');
-                    placeholder.innerHTML = `<span class="text-red-400">動画の読み込みに失敗しました。<br>Driveの共有設定を確認してください。</span>`;
-                };
-
                 modelVideo.onloadedmetadata = () => {
                     canvas.width = modelVideo.videoWidth;
                     canvas.height = modelVideo.videoHeight;
