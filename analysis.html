@@ -401,7 +401,7 @@
             }
         }
 
-        // --- ★修正: 描画＆角度計算関数（ロックオン対応版） ---
+        // --- ★修正: 描画＆角度計算関数（丸の拡大 ＆ 同期対応版） ---
         function calculateAngle(p1, p2, p3) {
             const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
             let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -428,7 +428,8 @@
                     const p = poseLandmarks[i];
                     if (p && p.visibility > 0.5) {
                         ctx.beginPath();
-                        ctx.arc(p.x * width, p.y * height, 8, 0, 2 * Math.PI);
+                        // ★修正: ガイドの丸も少し大きく (8 -> 10)
+                        ctx.arc(p.x * width, p.y * height, 10, 0, 2 * Math.PI);
                         ctx.fill();
                         ctx.stroke();
                     }
@@ -474,7 +475,8 @@
                 const p = poseLandmarks[jointIndex];
                 if (p && p.visibility > 0.2) {
                     ctx.beginPath();
-                    ctx.arc(p.x * width, p.y * height, 12, 0, 2 * Math.PI);
+                    // ★修正: 選択された丸を大きくする (12 -> 18)
+                    ctx.arc(p.x * width, p.y * height, 18, 0, 2 * Math.PI);
                     ctx.fillStyle = '#FFFFFF';
                     ctx.fill();
                     ctx.lineWidth = 4;
@@ -482,7 +484,8 @@
                     ctx.stroke();
                     
                     ctx.fillStyle = '#000000';
-                    ctx.font = 'bold 14px Arial';
+                    // ★修正: 中の数字も大きくする (14px -> 20px)
+                    ctx.font = 'bold 20px Arial';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
                     ctx.fillText(order + 1, p.x * width, p.y * height);
@@ -503,7 +506,7 @@
                     if (pt1 && pt2 && pt3 && pt1.visibility > 0.2 && pt2.visibility > 0.2 && pt3.visibility > 0.2) {
                         const angle = calculateAngle(pt1, pt2, pt3);
                         const x = pt2.x * width;
-                        const y = pt2.y * height - 35; 
+                        const y = pt2.y * height - 45; // ★修正: 丸が大きくなった分、文字を少し上にずらす
 
                         ctx.strokeStyle = '#000000';
                         ctx.lineWidth = 6;
