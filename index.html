@@ -50,6 +50,14 @@
     body.is-fullscreen #exitFsBtn {
       display: flex;
     }
+
+    /* ★追加: 反転ボタンのスタイル */
+    #mirrorBtn {
+      position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.6); color: white; border: 1px solid #cbd5e1; padding: 8px; border-radius: 50%; font-weight: bold; cursor: pointer; z-index: 10000; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; transition: background 0.2s;
+    }
+    #mirrorBtn.active {
+      background: #2563eb; border-color: #3b82f6;
+    }
   </style>
 </head>
 <body>
@@ -62,7 +70,13 @@
   </div>
 
   <div id="videoContainer">
+    <!-- ★追加: 左右反転ボタン -->
+    <button id="mirrorBtn" onclick="toggleMirror()" title="左右反転">
+      <span class="material-symbols-outlined">flip</span>
+    </button>
+
     <canvas id="delayCanvas"></canvas>
+    
     <!-- 全画面解除ボタン -->
     <button id="exitFsBtn" onclick="toggleFullscreen()">
       <span class="material-symbols-outlined">close_fullscreen</span> 戻る
@@ -98,6 +112,7 @@
     let delaySeconds = 5;
     let fps = 24; 
     let loopId = null;
+    let isMirrored = false; // ★追加: 反転状態フラグ
 
     async function startCamera() {
       try {
@@ -129,7 +144,15 @@
       // Safari対策: 準備が完全に整う前（HAVE_ENOUGH_DATA）でも映像が取れる状態なら進める
       if(video.readyState < 2) return; 
       
+      // ★修正: 録画（バッファリング）の段階で反転処理を適用する
+      offCtx.save();
+      if (isMirrored) {
+        offCtx.translate(offscreenCanvas.width, 0);
+        offCtx.scale(-1, 1);
+      }
       offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+      offCtx.restore();
+
       const frameData = offCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
       frameBuffer.push(frameData);
       
@@ -152,6 +175,19 @@
       while (frameBuffer.length > targetFrames) {
         frameBuffer.shift();
       }
+    }
+
+    // ★追加: 反転ボタンの切り替え処理
+    function toggleMirror() {
+      isMirrored = !isMirrored;
+      const btn = document.getElementById('mirrorBtn');
+      if (isMirrored) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+      // 反転した瞬間に過去のバッファをクリアする（反転前の映像が遅れて出てくるのを防ぐため）
+      frameBuffer = [];
     }
 
     function setDelay(sec, btnElement) {
