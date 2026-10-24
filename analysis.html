@@ -332,13 +332,8 @@
             }
         }
 
-        // --- 描画＆角度計算関数 (既存のまま変更なし) ---
-        const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-        const customConnections = [
-            [0, 11], [0, 12], [11, 12], [23, 24], [11, 23], [12, 24], 
-            [11, 13], [13, 15], [12, 14], [14, 16], [23, 25], [25, 27], [24, 26], [26, 28]
-        ];
-
+        // --- ★修正: 描画＆角度計算関数（手前側の半身のみ抽出バージョン） ---
+        
         function calculateAngle(p1, p2, p3) {
             const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
             let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -355,9 +350,34 @@
             const width = canvas.width;
             const height = canvas.height;
 
+            // ★魔法のロジック: 左右の肩のZ座標（奥行き）を比較し、カメラに近い方の半身を自動判定する
+            const isLeftCloser = poseLandmarks[11].z < poseLandmarks[12].z;
+
+            // 描画するポイントを手前側の半身＋頭のみに絞り込む
+            const head = 0; // 鼻（頭の代わり）
+            const shoulder = isLeftCloser ? 11 : 12;
+            const elbow = isLeftCloser ? 13 : 14;
+            const wrist = isLeftCloser ? 15 : 16;
+            const hip = isLeftCloser ? 23 : 24;
+            const knee = isLeftCloser ? 25 : 26;
+            const ankle = isLeftCloser ? 27 : 28;
+
+            const activeJoints = [head, shoulder, elbow, wrist, hip, knee, ankle];
+            
+            // 繋ぐ線を1本道（側面図）にする
+            const activeConnections = [
+                [head, shoulder],
+                [shoulder, elbow],
+                [elbow, wrist],
+                [shoulder, hip],
+                [hip, knee],
+                [knee, ankle]
+            ];
+
+            // 1. 太い線を引く
             ctx.lineWidth = 8;
             ctx.strokeStyle = '#00FF00';
-            customConnections.forEach(([i, j]) => {
+            activeConnections.forEach(([i, j]) => {
                 const p1 = poseLandmarks[i];
                 const p2 = poseLandmarks[j];
                 if (p1.visibility > 0.5 && p2.visibility > 0.5) {
@@ -368,7 +388,8 @@
                 }
             });
 
-            targetJoints.forEach(i => {
+            // 2. 大きな関節マーカーを描画
+            activeJoints.forEach(i => {
                 const p = poseLandmarks[i];
                 if (p.visibility > 0.5) {
                     ctx.beginPath();
@@ -381,12 +402,13 @@
                 }
             });
 
+            // 3. 一時停止中なら「角度」を描画（手前側の関節のみ）
             if (isPaused) {
                 const angleTargets = [
-                    { p1: 23, p2: 11, p3: 13 }, { p1: 24, p2: 12, p3: 14 },
-                    { p1: 11, p2: 13, p3: 15 }, { p1: 12, p2: 14, p3: 16 },
-                    { p1: 11, p2: 23, p3: 25 }, { p1: 12, p2: 24, p3: 26 },
-                    { p1: 23, p2: 25, p3: 27 }, { p1: 24, p2: 26, p3: 28 } 
+                    { p1: hip, p2: shoulder, p3: elbow }, // 肩の角度
+                    { p1: shoulder, p2: elbow, p3: wrist }, // 肘の角度
+                    { p1: shoulder, p2: hip, p3: knee }, // 腰の角度
+                    { p1: hip, p2: knee, p3: ankle }  // 膝の角度
                 ];
 
                 ctx.font = 'bold 36px Arial';
@@ -394,9 +416,9 @@
                 ctx.textBaseline = 'middle';
 
                 angleTargets.forEach(joint => {
-                    const pt1 = poseLandmarks[joint.p1];
-                    const pt2 = poseLandmarks[joint.p2]; 
-                    const pt3 = poseLandmarks[joint.p3];
+                    const pt1 = poseLandmarks[joint.joint1 || joint.p1];
+                    const pt2 = poseLandmarks[joint.joint2 || joint.p2]; 
+                    const pt3 = poseLandmarks[joint.joint3 || joint.p3];
 
                     if (pt1.visibility > 0.5 && pt2.visibility > 0.5 && pt3.visibility > 0.5) {
                         const angle = calculateAngle(pt1, pt2, pt3);
