@@ -46,6 +46,11 @@
         <div class="flex items-center space-x-2">
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
             <h1 class="font-bold text-base text-slate-800">マット運動 AI分析</h1>
+            
+            <!-- ★追加: ポイントリセットボタン -->
+            <button onclick="resetPoints()" class="ml-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold py-1 px-2 rounded flex items-center gap-1 transition-colors">
+                <span class="material-symbols-outlined" style="font-size: 14px;">refresh</span> 選択リセット
+            </button>
         </div>
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
@@ -67,10 +72,10 @@
                 </select>
             </div>
 
-            <div class="flex-1 bg-black rounded overflow-hidden relative group">
-                <!-- ★変更: videoとimgを両方用意し、初期はhidden -->
+            <!-- ★変更: id="modelContainer" と cursor-pointer を追加 -->
+            <div id="modelContainer" class="flex-1 bg-black rounded overflow-hidden relative group cursor-pointer">
                 <video id="modelVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
-<img id="modelImage" class="absolute inset-0 w-full h-full object-contain hidden">
+                <img id="modelImage" class="absolute inset-0 w-full h-full object-contain hidden">
                 
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10"></canvas>
                 
@@ -93,11 +98,12 @@
                     </label>
                 </div>
                 <div class="hidden sm:block text-xs text-slate-500 font-bold">
-                    ※一時停止で「角度」が出ます
+                    ※画面タップでポイントを選択
                 </div>
             </div>
 
-            <div class="flex-1 bg-black rounded overflow-hidden relative group">
+            <!-- ★変更: id="studentContainer" と cursor-pointer を追加 -->
+            <div id="studentContainer" class="flex-1 bg-black rounded overflow-hidden relative group cursor-pointer">
                 <video id="studentVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
                 <canvas id="studentCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
@@ -121,25 +127,27 @@
         let lastPoseModel = null, lastPoseStudent = null;
         let isProcessingModel = false, isProcessingStudent = false;
 
+        // ★追加: ユーザーがタップして選んだ関節のリスト（最大5個）
+        let selectedJoints = [];
+
         window.addEventListener('DOMContentLoaded', () => {
             modelVideo = document.getElementById('modelVideo');
             modelImage = document.getElementById('modelImage');
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
-            // ★変更: 親タブ(GASメインアプリ)に「準備完了」の合図を送る
+            // 親タブ(GASメインアプリ)に「準備完了」の合図を送る
             if (window.opener) {
                 window.opener.postMessage({ type: 'APP_READY' }, '*');
             } else {
                 document.getElementById("taskSelect").innerHTML = '<option value="">メインアプリから開いてください</option>';
             }
 
-            // 2. AIの初期化開始
             initAI();
             setupEventListeners();
         });
 
-        // ★追加: 親タブ(GASメインアプリ)からデータが送られてきた時の処理
+        // 親タブ(GASメインアプリ)からデータが送られてきた時の処理
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'TASK_DATA') {
                 const data = event.data.payload;
@@ -159,32 +167,12 @@
             });
         }
 
-        // ★追加: GASからデータを取得する関数
-        async function fetchTaskDataFromGAS() {
-            const select = document.getElementById("taskSelect");
-            try {
-                // URLの末尾に ?api=getTasks を付けてリクエスト
-                const response = await fetch(`${GAS_WEB_APP_URL}?api=getTasks`);
-                if (!response.ok) throw new Error('ネットワークエラー');
-                
-                const data = await response.json();
-                if (data.error) throw new Error(data.error);
-                
-                populateSelect(data);
-            } catch (error) {
-                console.error("データ取得失敗:", error);
-                select.innerHTML = '<option value="">データの取得に失敗しました</option>';
-            }
-        }
-
-        // ★修正: GAS側ですでに変換済みなので、そのまま表示するだけ
         function changeModelMedia() {
             const select = document.getElementById("taskSelect");
             const placeholder = document.getElementById("modelPlaceholder");
             const canvas = document.getElementById("modelCanvas");
             const ctx = canvas.getContext('2d');
             
-            // リセット
             modelVideo.pause();
             modelVideo.removeAttribute('src');
             modelVideo.load();
@@ -205,7 +193,6 @@
             placeholder.classList.add('hidden');
             
             if (task.type === 'image') {
-                // GASから送られてきたBase64データをそのままセット
                 modelImage.src = task.url;
                 modelImage.classList.remove('hidden');
                 
@@ -213,15 +200,11 @@
                     canvas.width = modelImage.naturalWidth;
                     canvas.height = modelImage.naturalHeight;
                     if (isAiReady) {
-                        try {
-                            await poseModelModel.send({ image: modelImage });
-                        } catch (e) {
-                            console.error("AI解析エラー:", e);
-                        }
+                        try { await poseModelModel.send({ image: modelImage }); } 
+                        catch (e) { console.error("AI解析エラー:", e); }
                     }
                 };
             } else {
-                // 動画の場合
                 modelVideo.src = task.url;
                 modelVideo.classList.remove('hidden');
                 
@@ -245,7 +228,6 @@
                 poseModelModel.setOptions(config);
                 poseModelModel.onResults((results) => {
                     lastPoseModel = results.poseLandmarks || null;
-                    // ★変更: 画像の場合は常に一時停止(角度表示)扱いとする
                     const isImage = !modelImage.classList.contains('hidden');
                     const isPaused = isImage ? true : modelVideo.paused;
                     drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isPaused);
@@ -286,13 +268,16 @@
 
         function setupEventListeners() {
             modelVideo.addEventListener('play', () => { requestAnimationFrame(processModelLoop); });
-            modelVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); });
+            modelVideo.addEventListener('pause', () => { 
+                const isImage = !modelImage.classList.contains('hidden');
+                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused); 
+            });
             modelVideo.addEventListener('seeked', async () => { 
                 if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
             });
 
             studentVideo.addEventListener('play', () => { requestAnimationFrame(processStudentLoop); });
-            studentVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); });
+            studentVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused); });
             studentVideo.addEventListener('seeked', async () => { 
                 if (isAiReady && studentVideo.readyState >= 2) await poseModelStudent.send({ image: studentVideo }); 
             });
@@ -311,6 +296,14 @@
                     document.getElementById('studentCanvas').height = studentVideo.videoHeight;
                     studentVideo.play();
                 };
+            });
+
+            // ★追加: 画面タップで関節をロックオンするイベント
+            document.getElementById('modelContainer').addEventListener('click', (e) => {
+                handleCanvasClick(e, document.getElementById('modelCanvas'), lastPoseModel);
+            });
+            document.getElementById('studentContainer').addEventListener('click', (e) => {
+                handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
             });
         }
 
@@ -332,8 +325,83 @@
             }
         }
 
-        // --- ★修正: 描画＆角度計算関数（手前側の半身のみ抽出バージョン） ---
-        
+        // ★追加: 選択リセット関数
+        function resetPoints() {
+            selectedJoints = [];
+            const isImage = !modelImage.classList.contains('hidden');
+            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused);
+            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
+        }
+
+        // ★追加: タップした位置に最も近い関節を探して選択する関数
+        function handleCanvasClick(event, canvas, poseLandmarks) {
+            if (!poseLandmarks) return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const videoRatio = canvas.width / canvas.height;
+            const rectRatio = rect.width / rect.height;
+            
+            let drawWidth, drawHeight, offsetX, offsetY;
+            if (videoRatio > rectRatio) {
+                drawWidth = rect.width;
+                drawHeight = rect.width / videoRatio;
+                offsetX = 0;
+                offsetY = (rect.height - drawHeight) / 2;
+            } else {
+                drawHeight = rect.height;
+                drawWidth = rect.height * videoRatio;
+                offsetX = (rect.width - drawWidth) / 2;
+                offsetY = 0;
+            }
+
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+
+            // キャンバス内の実際の画像座標に変換 (0.0 ~ 1.0)
+            const normX = (clickX - offsetX) / drawWidth;
+            const normY = (clickY - offsetY) / drawHeight;
+
+            if (normX < 0 || normX > 1 || normY < 0 || normY > 1) return; // 画像外をクリック
+
+            let minDist = 0.15; // タップ判定の閾値（画面サイズの15%程度）
+            let closestJoint = -1;
+
+            // 選択可能な関節 (鼻, 左右の肩, 肘, 手首, 腰, 膝, 足首)
+            const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+            targetJoints.forEach(i => {
+                const p = poseLandmarks[i];
+                if (p && p.visibility > 0.5) {
+                    const dist = Math.sqrt(Math.pow(p.x - normX, 2) + Math.pow(p.y - normY, 2));
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestJoint = i;
+                    }
+                }
+            });
+
+            if (closestJoint !== -1) {
+                const index = selectedJoints.indexOf(closestJoint);
+                if (index !== -1) {
+                    // すでに選択されていれば解除
+                    selectedJoints.splice(index, 1);
+                } else {
+                    // 選択されていなければ追加 (最大5個)
+                    if (selectedJoints.length < 5) {
+                        selectedJoints.push(closestJoint);
+                    } else {
+                        alert("選択できるポイントは5個までです。");
+                    }
+                }
+                
+                // 両方のキャンバスを再描画
+                const isImage = !modelImage.classList.contains('hidden');
+                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused);
+                drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
+            }
+        }
+
+        // --- ★修正: 描画＆角度計算関数（ロックオン対応版） ---
         function calculateAngle(p1, p2, p3) {
             const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
             let angle = Math.abs(radians * 180.0 / Math.PI);
@@ -350,77 +418,89 @@
             const width = canvas.width;
             const height = canvas.height;
 
-            // ★魔法のロジック: 左右の肩のZ座標（奥行き）を比較し、カメラに近い方の半身を自動判定する
-            const isLeftCloser = poseLandmarks[11].z < poseLandmarks[12].z;
+            // 1. 何も選択されていない場合は、ガイドとして薄く全関節を表示する
+            if (selectedJoints.length === 0) {
+                const guideJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+                ctx.lineWidth = 2;
+                guideJoints.forEach(i => {
+                    const p = poseLandmarks[i];
+                    if (p && p.visibility > 0.5) {
+                        ctx.beginPath();
+                        ctx.arc(p.x * width, p.y * height, 8, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                });
+                
+                // 一時停止中なら案内テキストを表示
+                if (isPaused) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+                    ctx.font = 'bold 24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.shadowColor = "black";
+                    ctx.shadowBlur = 4;
+                    ctx.shadowOffsetX = 2;
+                    ctx.shadowOffsetY = 2;
+                    ctx.fillText('見たい関節をタップ (最大5個)', width / 2, 40);
+                    ctx.shadowBlur = 0;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 0;
+                }
+                return;
+            }
 
-            // 描画するポイントを手前側の半身＋頭のみに絞り込む
-            const head = 0; // 鼻（頭の代わり）
-            const shoulder = isLeftCloser ? 11 : 12;
-            const elbow = isLeftCloser ? 13 : 14;
-            const wrist = isLeftCloser ? 15 : 16;
-            const hip = isLeftCloser ? 23 : 24;
-            const knee = isLeftCloser ? 25 : 26;
-            const ankle = isLeftCloser ? 27 : 28;
-
-            const activeJoints = [head, shoulder, elbow, wrist, hip, knee, ankle];
-            
-            // 繋ぐ線を1本道（側面図）にする
-            const activeConnections = [
-                [head, shoulder],
-                [shoulder, elbow],
-                [elbow, wrist],
-                [shoulder, hip],
-                [hip, knee],
-                [knee, ankle]
-            ];
-
-            // 1. 太い線を引く
-            ctx.lineWidth = 8;
+            // 2. 選択された関節同士を順番に線で結ぶ
+            ctx.lineWidth = 6;
             ctx.strokeStyle = '#00FF00';
-            activeConnections.forEach(([i, j]) => {
-                const p1 = poseLandmarks[i];
-                const p2 = poseLandmarks[j];
-                if (p1.visibility > 0.5 && p2.visibility > 0.5) {
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x * width, p1.y * height);
-                    ctx.lineTo(p2.x * width, p2.y * height);
-                    ctx.stroke();
+            ctx.beginPath();
+            let firstPoint = true;
+            selectedJoints.forEach(jointIndex => {
+                const p = poseLandmarks[jointIndex];
+                if (p && p.visibility > 0.2) {
+                    if (firstPoint) {
+                        ctx.moveTo(p.x * width, p.y * height);
+                        firstPoint = false;
+                    } else {
+                        ctx.lineTo(p.x * width, p.y * height);
+                    }
                 }
             });
+            if (!firstPoint) ctx.stroke();
 
-            // 2. 大きな関節マーカーを描画
-            activeJoints.forEach(i => {
-                const p = poseLandmarks[i];
-                if (p.visibility > 0.5) {
+            // 3. 選択された関節のマーカーと番号を描画
+            selectedJoints.forEach((jointIndex, order) => {
+                const p = poseLandmarks[jointIndex];
+                if (p && p.visibility > 0.2) {
                     ctx.beginPath();
-                    ctx.arc(p.x * width, p.y * height, 10, 0, 2 * Math.PI);
+                    ctx.arc(p.x * width, p.y * height, 12, 0, 2 * Math.PI);
                     ctx.fillStyle = '#FFFFFF';
                     ctx.fill();
                     ctx.lineWidth = 4;
                     ctx.strokeStyle = '#FF0000';
                     ctx.stroke();
+                    
+                    ctx.fillStyle = '#000000';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(order + 1, p.x * width, p.y * height);
                 }
             });
 
-            // 3. 一時停止中なら「角度」を描画（手前側の関節のみ）
-            if (isPaused) {
-                const angleTargets = [
-                    { p1: hip, p2: shoulder, p3: elbow }, // 肩の角度
-                    { p1: shoulder, p2: elbow, p3: wrist }, // 肘の角度
-                    { p1: shoulder, p2: hip, p3: knee }, // 腰の角度
-                    { p1: hip, p2: knee, p3: ankle }  // 膝の角度
-                ];
-
+            // 4. 3つ以上選択されている場合、その間の角度を計算して表示
+            if (selectedJoints.length >= 3) {
                 ctx.font = 'bold 36px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
 
-                angleTargets.forEach(joint => {
-                    const pt1 = poseLandmarks[joint.joint1 || joint.p1];
-                    const pt2 = poseLandmarks[joint.joint2 || joint.p2]; 
-                    const pt3 = poseLandmarks[joint.joint3 || joint.p3];
+                for (let i = 1; i < selectedJoints.length - 1; i++) {
+                    const pt1 = poseLandmarks[selectedJoints[i - 1]];
+                    const pt2 = poseLandmarks[selectedJoints[i]];
+                    const pt3 = poseLandmarks[selectedJoints[i + 1]];
 
-                    if (pt1.visibility > 0.5 && pt2.visibility > 0.5 && pt3.visibility > 0.5) {
+                    if (pt1 && pt2 && pt3 && pt1.visibility > 0.2 && pt2.visibility > 0.2 && pt3.visibility > 0.2) {
                         const angle = calculateAngle(pt1, pt2, pt3);
                         const x = pt2.x * width;
                         const y = pt2.y * height - 35; 
@@ -431,7 +511,7 @@
                         ctx.fillStyle = '#FFFF00';
                         ctx.fillText(angle + '°', x, y);
                     }
-                });
+                }
             }
         }
     </script>
