@@ -206,6 +206,7 @@
             });
         }
 
+        // ★修正: 選択時の処理（未登録時のメッセージを追加）
         function changeModelMedia() {
             const select = document.getElementById("taskSelect");
             const placeholder = document.getElementById("modelPlaceholder");
@@ -231,6 +232,13 @@
             
             const task = taskDataList[select.value];
             
+            // ★追加: 見本メディアが未登録の場合
+            if (!task.url) {
+                placeholder.classList.remove('hidden');
+                placeholder.innerHTML = "この技の見本メディアは未登録です";
+                return;
+            }
+            
             if (task.type === 'image') {
                 // 画像の場合は親タブ(GAS)に変換を要求し、ローディング表示にする
                 placeholder.classList.remove('hidden');
@@ -248,7 +256,7 @@
                 modelVideo.onloadedmetadata = () => {
                     canvas.width = modelVideo.videoWidth;
                     canvas.height = modelVideo.videoHeight;
-                    modelVideo.play(); // ★即時再生
+                    modelVideo.play(); // 即時再生
                 };
             }
         }
