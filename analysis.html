@@ -168,6 +168,30 @@
                 const data = event.data.payload;
                 populateSelect(data);
             }
+            // 親タブから変換された画像データが届いた時の処理
+            if (event.data && event.data.type === 'BASE64_RESULT') {
+                const base64Data = event.data.base64;
+                const placeholder = document.getElementById("modelPlaceholder");
+                const canvas = document.getElementById("modelCanvas");
+                
+                if (base64Data) {
+                    placeholder.classList.add('hidden');
+                    modelImage.src = base64Data;
+                    modelImage.classList.remove('hidden');
+                    document.getElementById('modelContainer').classList.add('is-paused');
+                    
+                    modelImage.onload = async () => {
+                        canvas.width = modelImage.naturalWidth;
+                        canvas.height = modelImage.naturalHeight;
+                        if (isAiReady) {
+                            try { await poseModelModel.send({ image: modelImage }); } 
+                            catch (e) { console.error("AI解析エラー:", e); }
+                        }
+                    };
+                } else {
+                    placeholder.innerHTML = "画像の読み込みに失敗しました";
+                }
+            }
         });
 
         function populateSelect(data) {
@@ -206,28 +230,25 @@
             }
             
             const task = taskDataList[select.value];
-            placeholder.classList.add('hidden');
             
             if (task.type === 'image') {
-                modelImage.src = task.url;
-                modelImage.classList.remove('hidden');
-                document.getElementById('modelContainer').classList.add('is-paused'); // 画像は常に一時停止扱い
+                // 画像の場合は親タブ(GAS)に変換を要求し、ローディング表示にする
+                placeholder.classList.remove('hidden');
+                placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">画像を準備中...</span>';
                 
-                modelImage.onload = async () => {
-                    canvas.width = modelImage.naturalWidth;
-                    canvas.height = modelImage.naturalHeight;
-                    if (isAiReady) {
-                        try { await poseModelModel.send({ image: modelImage }); } 
-                        catch (e) { console.error("AI解析エラー:", e); }
-                    }
-                };
+                if (window.opener) {
+                    window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId }, '*');
+                }
             } else {
+                // 動画の場合は即座に表示して再生
+                placeholder.classList.add('hidden');
                 modelVideo.src = task.url;
                 modelVideo.classList.remove('hidden');
                 
                 modelVideo.onloadedmetadata = () => {
                     canvas.width = modelVideo.videoWidth;
                     canvas.height = modelVideo.videoHeight;
+                    modelVideo.play(); // ★即時再生
                 };
             }
         }
