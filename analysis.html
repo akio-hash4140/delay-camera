@@ -493,8 +493,17 @@
             }
         }
 
-        function calculateAngle(p1, p2, p3) {
-            const radians = Math.atan2(p3.y - p2.y, p3.x - p2.x) - Math.atan2(p1.y - p2.y, p1.x - p2.x);
+        // --- ★修正: 角度計算関数（アスペクト比の歪み補正版） ---
+        function calculateAngle(p1, p2, p3, width, height) {
+            // 0.0〜1.0の割合データを、実際の動画の縦横ピクセルサイズに掛け合わせて「真の座標」に戻す
+            const p1x = p1.x * width;
+            const p1y = p1.y * height;
+            const p2x = p2.x * width;
+            const p2y = p2.y * height;
+            const p3x = p3.x * width;
+            const p3y = p3.y * height;
+
+            const radians = Math.atan2(p3y - p2y, p3x - p2x) - Math.atan2(p1y - p2y, p1x - p2x);
             let angle = Math.abs(radians * 180.0 / Math.PI);
             if (angle > 180.0) angle = 360.0 - angle;
             return Math.round(angle);
@@ -509,9 +518,8 @@
             const width = canvas.width;
             const height = canvas.height;
 
-            // ★変更: ポイント打ちモード中、または何も選択されていない場合
+            // ポイント打ちモード中、または何も選択されていない場合
             if (currentPickingTarget || selectedJoints.length === 0) {
-                // モード中のみガイドを表示する
                 if (currentPickingTarget) {
                     const guideJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
                     ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
@@ -528,7 +536,6 @@
                     });
                 }
                 
-                // 選択中のポイントがあれば線で結ぶ
                 if (selectedJoints.length > 0) {
                     ctx.lineWidth = 6;
                     ctx.strokeStyle = '#00FF00';
@@ -583,7 +590,6 @@
                 const p = poseLandmarks[jointIndex];
                 if (p && p.visibility > 0.2) {
                     ctx.beginPath();
-                    // ★変更: 打ったポイントの丸をさらに大きく (24px)
                     ctx.arc(p.x * width, p.y * height, 24, 0, 2 * Math.PI);
                     ctx.fillStyle = '#FFFFFF';
                     ctx.fill();
@@ -610,7 +616,8 @@
                 const pt3 = poseLandmarks[selectedJoints[2]];
 
                 if (pt1 && pt2 && pt3 && pt1.visibility > 0.2 && pt2.visibility > 0.2 && pt3.visibility > 0.2) {
-                    const angle = calculateAngle(pt1, pt2, pt3);
+                    // ★修正: width と height を渡して、歪みのない正確な角度を計算する
+                    const angle = calculateAngle(pt1, pt2, pt3, width, height);
                     const x = pt2.x * width;
                     const y = pt2.y * height - 55; 
 
