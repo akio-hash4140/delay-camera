@@ -114,7 +114,7 @@
             </div>
 
             <div id="studentContainer" class="flex-1 bg-black rounded overflow-hidden relative group cursor-pointer">
-                <video id="studentVideo" playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
+                <video id="studentVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
                 <canvas id="studentCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
                 <div id="studentPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-sm font-bold pointer-events-none z-20">
@@ -303,9 +303,15 @@
                 // iframeの動画はクリックで再生/停止できないため何もしない
             });
 
+            // ★修正: 自分の動画エリアのクリック処理（スライドバー操作時は一時停止しない）
             document.getElementById('studentContainer').addEventListener('click', (e) => {
                 if (currentPickingTarget) return;
                 if (e.target.closest('.edit-points-btn')) return;
+                
+                // スライドバー（画面下部60px）をクリックした場合は、再生/一時停止の切り替えを無視する
+                const rect = document.getElementById('studentContainer').getBoundingClientRect();
+                const clickY = e.clientY - rect.top;
+                if (rect.height - clickY < 60) return;
                 
                 if (studentVideo.paused) studentVideo.play();
                 else studentVideo.pause();
