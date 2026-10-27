@@ -82,8 +82,8 @@
             </div>
 
             <div id="modelContainer" class="flex-1 bg-black rounded overflow-hidden relative group cursor-pointer">
-                <!-- ★変更: 見本動画は iframe で確実に再生させる（AI解析はしない） -->
-                <iframe id="modelIframe" class="absolute inset-0 w-full h-full border-none hidden" allow="autoplay" allowfullscreen></iframe>
+                <!-- ★変更: iframeをやめてvideoタグを復活（AI解析可能にする） -->
+                <video id="modelVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
                 <img id="modelImage" class="absolute inset-0 w-full h-full object-contain hidden">
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
@@ -130,19 +130,19 @@
     </main>
 
     <script>
-        let modelIframe, modelImage, studentVideo, videoUpload;
+        let modelVideo, modelImage, studentVideo, videoUpload;
         let taskDataList = [];
 
         let poseModelModel, poseModelStudent; 
         let isAiReady = false;
         let lastPoseModel = null, lastPoseStudent = null;
-        let isProcessingStudent = false;
+        let isProcessingModel = false, isProcessingStudent = false;
 
         let selectedJoints = [];
         let currentPickingTarget = null; 
 
         window.addEventListener('DOMContentLoaded', () => {
-            modelIframe = document.getElementById('modelIframe');
+            modelVideo = document.getElementById('modelVideo');
             modelImage = document.getElementById('modelImage');
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
@@ -157,6 +157,7 @@
             setupEventListeners();
         });
 
+        // ★変更: 動画も画像もBase64で受け取り、AI解析にかける
         window.addEventListener('message', (event) => {
             if (event.data && event.data.type === 'TASK_DATA') {
                 const data = event.data.payload;
@@ -164,26 +165,39 @@
             }
             if (event.data && event.data.type === 'BASE64_RESULT') {
                 const base64Data = event.data.base64;
+                const mediaType = event.data.mediaType;
                 const placeholder = document.getElementById("modelPlaceholder");
                 const canvas = document.getElementById("modelCanvas");
                 
                 if (base64Data) {
                     placeholder.classList.add('hidden');
-                    modelImage.src = base64Data;
-                    modelImage.classList.remove('hidden');
                     canvas.classList.remove('hidden');
-                    document.getElementById('modelContainer').classList.add('is-paused');
                     
-                    modelImage.onload = async () => {
-                        canvas.width = modelImage.naturalWidth;
-                        canvas.height = modelImage.naturalHeight;
-                        if (isAiReady) {
-                            try { await poseModelModel.send({ image: modelImage }); } 
-                            catch (e) { console.error("AI解析エラー:", e); }
-                        }
-                    };
+                    if (mediaType === 'image') {
+                        modelImage.src = base64Data;
+                        modelImage.classList.remove('hidden');
+                        document.getElementById('modelContainer').classList.add('is-paused');
+                        
+                        modelImage.onload = async () => {
+                            canvas.width = modelImage.naturalWidth;
+                            canvas.height = modelImage.naturalHeight;
+                            if (isAiReady) {
+                                try { await poseModelModel.send({ image: modelImage }); } 
+                                catch (e) { console.error("AI解析エラー:", e); }
+                            }
+                        };
+                    } else {
+                        modelVideo.src = base64Data;
+                        modelVideo.classList.remove('hidden');
+                        
+                        modelVideo.onloadedmetadata = () => {
+                            canvas.width = modelVideo.videoWidth;
+                            canvas.height = modelVideo.videoHeight;
+                            modelVideo.play();
+                        };
+                    }
                 } else {
-                    placeholder.innerHTML = "画像の読み込みに失敗しました";
+                    placeholder.innerHTML = "読み込みに失敗しました";
                 }
             }
         });
@@ -206,10 +220,12 @@
             const canvas = document.getElementById("modelCanvas");
             const ctx = canvas.getContext('2d');
             
-            modelIframe.src = '';
+            modelVideo.pause();
+            modelVideo.removeAttribute('src');
+            modelVideo.load();
             modelImage.removeAttribute('src');
             
-            modelIframe.classList.add('hidden');
+            modelVideo.classList.add('hidden');
             modelImage.classList.add('hidden');
             canvas.classList.add('hidden');
             document.getElementById('modelContainer').classList.remove('is-paused');
@@ -230,25 +246,20 @@
                 return;
             }
             
-            if (task.type === 'image') {
-                placeholder.classList.remove('hidden');
-                placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">画像を準備中...</span>';
-                if (window.opener) {
-                    window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId }, '*');
-                }
-            } else {
-                // ★変更: 動画の場合は iframe で表示（AI解析はしない）
-                placeholder.classList.add('hidden');
-                modelIframe.src = 'https://drive.google.com/file/d/' + task.fileId + '/preview';
-                modelIframe.classList.remove('hidden');
+            // ★変更: 画像も動画も、親タブ(GAS)に変換を要求し、ローディング表示にする
+            placeholder.classList.remove('hidden');
+            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">メディアを準備中...</span>';
+            
+            if (window.opener) {
+                window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
             }
         }
 
         async function initAI() {
             try {
-                // ★変更: modelComplexity を 0 にして劇的に軽量化（カクカク解消）
+                // ★変更: 見本動画も解析するため、modelComplexityを1に戻す
                 const config = {
-                    modelComplexity: 0, 
+                    modelComplexity: 1, 
                     smoothLandmarks: true,
                     minDetectionConfidence: 0.5,
                     minTrackingConfidence: 0.5
@@ -260,7 +271,9 @@
                 poseModelModel.setOptions(config);
                 poseModelModel.onResults((results) => {
                     lastPoseModel = results.poseLandmarks || null;
-                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true);
+                    const isImage = !modelImage.classList.contains('hidden');
+                    const isPaused = isImage ? true : modelVideo.paused;
+                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isPaused);
                 });
                 await poseModelModel.initialize();
 
@@ -300,21 +313,38 @@
             document.getElementById('modelContainer').addEventListener('click', (e) => {
                 if (currentPickingTarget) return; 
                 if (e.target.closest('.edit-points-btn')) return; 
-                // iframeの動画はクリックで再生/停止できないため何もしない
+                
+                const rect = document.getElementById('modelContainer').getBoundingClientRect();
+                const clickY = e.clientY - rect.top;
+                if (rect.height - clickY < 60) return;
+                
+                if (!modelImage.classList.contains('hidden')) return;
+                if (modelVideo.paused) modelVideo.play();
+                else modelVideo.pause();
             });
 
-            // ★修正: 自分の動画エリアのクリック処理（スライドバー操作時は一時停止しない）
             document.getElementById('studentContainer').addEventListener('click', (e) => {
                 if (currentPickingTarget) return;
                 if (e.target.closest('.edit-points-btn')) return;
                 
-                // スライドバー（画面下部60px）をクリックした場合は、再生/一時停止の切り替えを無視する
                 const rect = document.getElementById('studentContainer').getBoundingClientRect();
                 const clickY = e.clientY - rect.top;
                 if (rect.height - clickY < 60) return;
                 
                 if (studentVideo.paused) studentVideo.play();
                 else studentVideo.pause();
+            });
+
+            modelVideo.addEventListener('play', () => { 
+                document.getElementById('modelContainer').classList.remove('is-paused');
+                requestAnimationFrame(processModelLoop); 
+            });
+            modelVideo.addEventListener('pause', () => { 
+                document.getElementById('modelContainer').classList.add('is-paused');
+                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); 
+            });
+            modelVideo.addEventListener('seeked', async () => { 
+                if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
             });
 
             studentVideo.addEventListener('play', () => { 
@@ -351,6 +381,15 @@
             document.getElementById('studentCanvas').addEventListener('click', (e) => {
                 if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
             });
+        }
+
+        async function processModelLoop() {
+            if (!modelVideo.paused && !modelVideo.ended && !isProcessingModel && modelVideo.readyState >= 2) {
+                isProcessingModel = true;
+                await poseModelModel.send({ image: modelVideo });
+                isProcessingModel = false;
+                requestAnimationFrame(processModelLoop);
+            }
         }
 
         async function processStudentLoop() {
@@ -408,7 +447,7 @@
             document.getElementById('studentContainer').classList.remove('picking-mode');
             
             const isImage = !modelImage.classList.contains('hidden');
-            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true);
+            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused);
             drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
         }
 
@@ -478,7 +517,6 @@
             }
         }
 
-        // ★修正: 角度計算関数（アスペクト比の歪み補正版）
         function calculateAngle(p1, p2, p3, width, height) {
             const p1x = p1.x * width;
             const p1y = p1.y * height;
@@ -597,7 +635,6 @@
                 const pt3 = poseLandmarks[selectedJoints[2]];
 
                 if (pt1 && pt2 && pt3 && pt1.visibility > 0.2 && pt2.visibility > 0.2 && pt3.visibility > 0.2) {
-                    // ★修正: width と height を渡して、歪みのない正確な角度を計算する
                     const angle = calculateAngle(pt1, pt2, pt3, width, height);
                     const x = pt2.x * width;
                     const y = pt2.y * height - 55; 
