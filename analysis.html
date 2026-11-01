@@ -163,8 +163,9 @@
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
-            if (targetWindow && targetWindow !== window) {
-                targetWindow.postMessage({ type: 'APP_READY' }, '*');
+            // ★修正1: 通信部分を確実に動いていた元の形に戻しました
+            if (window.opener) {
+                window.opener.postMessage({ type: 'APP_READY' }, '*');
             } else {
                 document.getElementById("taskSelect").innerHTML = '<option value="">メインアプリから開いてください</option>';
             }
@@ -270,8 +271,9 @@
             placeholder.classList.remove('hidden');
             placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">メディアを準備中...</span>';
             
-            if (targetWindow && targetWindow !== window) {
-                targetWindow.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
+            // ★修正2: ここも通信部分を確実に動いていた元の形に戻しました
+            if (window.opener) {
+                window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
             }
         }
 
@@ -350,26 +352,8 @@
         }
 
         function setupEventListeners() {
-            document.getElementById('modelContainer').addEventListener('click', (e) => {
-                if (currentPickingTarget) return;
-                const rect = document.getElementById('modelContainer').getBoundingClientRect();
-                if (rect.height - (e.clientY - rect.top) < 60) return; 
-                
-                if (!modelImage.classList.contains('hidden')) return;
-                if (modelVideo.paused) modelVideo.play();
-                else modelVideo.pause();
-            });
-
-            document.getElementById('studentContainer').addEventListener('click', (e) => {
-                if (currentPickingTarget) return;
-                if (e.target.closest('#startPickBtn') || e.target.closest('#resetPickBtn')) return;
-                
-                const rect = document.getElementById('studentContainer').getBoundingClientRect();
-                if (rect.height - (e.clientY - rect.top) < 60) return;
-                
-                if (studentVideo.paused) studentVideo.play();
-                else studentVideo.pause();
-            });
+            // ★修正3: 動画画面クリック時の自前再生/停止処理を削除しました。
+            // 動画のコントロールバー（標準機能）と自前のクリック判定が競合して「止まったり止まらなかったり」するのを防ぐため、操作は動画下部のコントロールバーに一本化します。
 
             modelVideo.addEventListener('play', () => { 
                 document.getElementById('modelContainer').classList.remove('is-paused');
@@ -388,9 +372,10 @@
             studentVideo.addEventListener('play', () => { 
                 document.getElementById('studentContainer').classList.remove('is-paused');
                 document.getElementById('studentContainer').classList.add('is-playing');
-                updateActionButtonsUI();
+                updateActionButtonsUI(); // アクションボタンを隠す
                 requestAnimationFrame(processStudentLoop); 
                 
+                // 見本動画も連動して再生
                 if (modelVideo.classList.contains('hidden') === false && modelVideo.paused) {
                     modelVideo.play();
                 }
@@ -398,9 +383,10 @@
             studentVideo.addEventListener('pause', () => { 
                 document.getElementById('studentContainer').classList.remove('is-playing');
                 document.getElementById('studentContainer').classList.add('is-paused');
-                updateActionButtonsUI();
+                updateActionButtonsUI(); // アクションボタンを表示
                 drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); 
                 
+                // 見本動画も連動して一時停止
                 if (modelVideo.classList.contains('hidden') === false && !modelVideo.paused) {
                     modelVideo.pause();
                 }
@@ -425,6 +411,7 @@
                 };
             });
 
+            // ピッキング操作時のみクリックを許可
             document.getElementById('studentCanvas').addEventListener('click', (e) => {
                 if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
             });
