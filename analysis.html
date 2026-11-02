@@ -50,7 +50,7 @@
     <header class="h-12 shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm z-20">
         <div class="flex items-center space-x-2">
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
-            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v3.0</span></h1>
+            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.0</span></h1>
         </div>
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
@@ -95,9 +95,20 @@
                         <input type="file" id="videoUpload" accept="video/*" class="hidden" disabled>
                     </label>
                 </div>
+                
+                <!-- ★新提案の「上部常設ボタン」 -->
+                <div class="flex items-center gap-2">
+                    <button id="topStartPickBtn" onclick="startPickingMode()" class="opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 px-3 rounded flex items-center gap-1 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> 角度を測る
+                    </button>
+                    <button id="topResetPickBtn" onclick="resetPoints()" class="hidden bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-1.5 px-3 rounded flex items-center gap-1 shadow-sm transition-colors">
+                        <span class="material-symbols-outlined" style="font-size: 16px;">delete</span> リセット
+                    </button>
+                </div>
             </div>
 
             <div id="studentContainer" class="flex-1 bg-black rounded overflow-hidden relative group">
+                <!-- 標準のコントロールバーのみを使用 -->
                 <video id="studentVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
                 <canvas id="studentCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
@@ -107,16 +118,6 @@
                 </div>
 
                 <div class="picking-overlay"><span class="material-symbols-outlined">ads_click</span> 関節をタップして選択 (<span class="pick-count">0</span>/3)</div>
-
-                <!-- 巨大なアクションボタン (一時停止中のみ表示) -->
-                <div class="absolute bottom-8 left-0 right-0 flex flex-col items-center gap-3 z-30 pointer-events-none">
-                    <button id="startPickBtn" class="pointer-events-auto hidden bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold shadow-lg border-2 border-white items-center gap-2 transition-transform active:scale-95 text-lg" onclick="startPickingMode()">
-                        <span class="material-symbols-outlined text-2xl">edit</span> 角度を測る (3点を選択)
-                    </button>
-                    <button id="resetPickBtn" class="pointer-events-auto hidden bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full font-bold shadow-lg border-2 border-white items-center gap-2 transition-transform active:scale-95 text-lg" onclick="resetPoints()">
-                        <span class="material-symbols-outlined text-2xl">delete</span> ポイントをリセット
-                    </button>
-                </div>
             </div>
         </section>
 
@@ -140,7 +141,6 @@
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
-            // ★GAS側との通信（最初に完璧に動いていたオリジナルの記述に完全に戻しました）
             if (window.opener) {
                 window.opener.postMessage({ type: 'APP_READY' }, '*');
             } else {
@@ -237,32 +237,36 @@
                 return;
             }
             
-            // ★キャッシュ対策の確認文字（これが表示されれば最新版です）
+            // GASからの返答待ち表示
             placeholder.classList.remove('hidden');
-            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASと通信中...</span>';
+            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASからデータを読み込み中...</span>';
             
-            // ★GAS側へBase64要求（元々動いていたオリジナルの記述）
             if (window.opener) {
                 window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
             }
         }
 
+        // 上部の常設ボタンの表示切替
         function updateActionButtonsUI() {
-            const startBtn = document.getElementById('startPickBtn');
-            const resetBtn = document.getElementById('resetPickBtn');
-
-            // 自分の動画のUI制御（アップロードされていて、かつ一時停止中の時だけボタンを出す）
-            if (studentVideo.readyState === 0 || !studentVideo.paused || currentPickingTarget === 'student') {
-                startBtn.style.display = 'none';
-                resetBtn.style.display = 'none';
+            const startBtn = document.getElementById('topStartPickBtn');
+            const resetBtn = document.getElementById('topResetPickBtn');
+            
+            // まだ動画がアップロードされていない場合は押せないようにする
+            if (!studentVideo.src) {
+                startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                startBtn.classList.remove('hidden');
+                resetBtn.classList.add('hidden');
+                return;
+            }
+            
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            if (selectedJoints.length > 0) {
+                startBtn.classList.add('hidden');
+                resetBtn.classList.remove('hidden');
             } else {
-                if (selectedJoints.length > 0) {
-                    startBtn.style.display = 'none';
-                    resetBtn.style.display = 'flex';
-                } else {
-                    startBtn.style.display = 'flex';
-                    resetBtn.style.display = 'none';
-                }
+                startBtn.classList.remove('hidden');
+                resetBtn.classList.add('hidden');
             }
         }
 
@@ -316,8 +320,6 @@
         }
 
         function setupEventListeners() {
-            // ★重要修正: 「画面クリックで再生」の誤作動プログラムを完全削除しました。操作は動画の標準バーのみで行います。
-
             modelVideo.addEventListener('play', () => { 
                 requestAnimationFrame(processModelLoop); 
             });
@@ -328,19 +330,15 @@
                 if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
             });
 
-            // 自分の動画のイベント（★見本動画との同期再生と、ボタンの表示切替）
+            // 自分の動画と見本動画の「同期再生」
             studentVideo.addEventListener('play', () => { 
-                updateActionButtonsUI();
                 requestAnimationFrame(processStudentLoop); 
-                
                 if (!modelVideo.classList.contains('hidden') && modelVideo.paused) {
                     modelVideo.play();
                 }
             });
             studentVideo.addEventListener('pause', () => { 
-                updateActionButtonsUI();
                 drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent); 
-                
                 if (!modelVideo.classList.contains('hidden') && !modelVideo.paused) {
                     modelVideo.pause();
                 }
@@ -358,14 +356,20 @@
                 studentVideo.classList.remove('hidden');
                 document.getElementById('studentCanvas').classList.remove('hidden');
                 
-                studentVideo.onloadedmetadata = () => {
+                studentVideo.onloadedmetadata = async () => {
                     document.getElementById('studentCanvas').width = studentVideo.videoWidth;
                     document.getElementById('studentCanvas').height = studentVideo.videoHeight;
                     updateActionButtonsUI();
+                    
+                    // ★ 修正点：動画アップロード直後に「1フレームだけ強制的にAIに読ませる」ことで、一時停止のまま即座にポイントを打てるようにしました！
+                    if (isAiReady) {
+                        try { await poseModelStudent.send({ image: studentVideo }); } 
+                        catch (err) { console.error(err); }
+                    }
                 };
             });
 
-            // ピッキング（ポイント打ち）は自分の動画側のみ許可
+            // ピッキング操作時のみキャンバスのクリックを許可
             document.getElementById('studentCanvas').addEventListener('click', (e) => {
                 if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
             });
@@ -389,7 +393,15 @@
             }
         }
 
-        function startPickingMode() {
+        // ★ 新提案：「角度を測る」ボタンを押したときの動作
+        async function startPickingMode() {
+            if (!studentVideo.src) return; // 動画がない時は無効
+            
+            // 動画が再生中なら自動で一時停止する
+            if (!studentVideo.paused) studentVideo.pause();
+            if (modelVideo.src && !modelVideo.paused) modelVideo.pause();
+            
+            // ピッキングモード開始
             currentPickingTarget = 'student';
             selectedJoints = []; 
             document.getElementById('studentContainer').classList.add('picking-mode');
@@ -407,7 +419,7 @@
             currentPickingTarget = null;
             updateActionButtonsUI(); 
             
-            // ★見本と自分の両方のキャンバスに自動描画（ポイント連動）
+            // ★ 見本と自分の両方に自動でポイントを描画
             drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel);
             drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent);
         }
@@ -427,7 +439,11 @@
         }
 
         function handleCanvasClick(event, canvas, poseLandmarks) {
-            if (!poseLandmarks || currentPickingTarget !== 'student') return;
+            if (!poseLandmarks) {
+                console.warn("まだAIが骨格を認識していません");
+                return;
+            }
+            if (currentPickingTarget !== 'student') return;
             
             const rect = canvas.getBoundingClientRect();
             const videoRatio = canvas.width / canvas.height;
