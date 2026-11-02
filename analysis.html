@@ -248,7 +248,7 @@
             modelImage.classList.add('hidden');
             canvas.classList.add('hidden');
             
-            document.getElementById('modelContainer').classList.remove('is-image', 'is-playing');
+            document.getElementById('modelContainer').classList.remove('is-playing');
             document.getElementById('modelContainer').classList.add('is-paused');
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -269,11 +269,232 @@
             }
             
             placeholder.classList.remove('hidden');
-            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">メディアを準備中...</span>';
+            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">データを読み込み中...</span>';
             
-            // ★修正2: ここも通信部分を確実に動いていた元の形に戻しました
+            // ★修正1: 通信を確実に動いていた元の形に戻しました
             if (window.opener) {
                 window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
+            }
+        }
+
+        // ★新規追加: 巨大ボタンの表示・非表示を管理する関数（HTMLが古くてもエラーになりません）
+        function updateActionButtonsUI() {
+            const startPickBtn = document.getElementById('startPickBtn');
+            const resetPickBtn = document.getElementById('resetPickBtn');
+            if (!startPickBtn || !resetPickBtn) return;
+            
+            const isStudentReady = !studentVideo.classList.contains('hidden');
+            const isStudentPaused = studentVideo.paused;
+            const isPicking = (currentPickingTarget === 'student');
+            
+            if (!isStudentReady || !isStudentPaused || isPicking) {
+                // 再生中、ピッキング中、未選択時はどちらも隠す
+                startPickBtn.style.display = 'none';
+                resetPickBtn.style.display = 'none';
+            } else {
+                // 一時停止中
+                if (selectedJoints.length > 0) {
+                    startPickBtn.style.display = 'none';
+                    resetPickBtn.style.display = 'flex';
+                } else {
+                    startPickBtn.style.display = 'flex';
+                    resetPickBtn.style.display = 'none';
+                }
+            }
+        }
+
+        function setupEventListeners() {
+            // ★機能強化: Javascriptで直接「巨大なボタン」を生成して追加します
+            if (!document.getElementById('startPickBtn')) {
+                const btnContainer = document.createElement('div');
+                btnContainer.className = "absolute bottom-8 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3 z-30 w-full justify-center pointer-events-none";
+                btnContainer.innerHTML = `
+                    <button id="startPickBtn" onclick="startPickingMode()" class="pointer-events-auto hidden bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-full font-bold shadow-lg border-2 border-white items-center gap-2 transition-transform active:scale-95 text-lg">
+                        <span class="material-symbols-outlined text-2xl">edit</span> 角度を測る (ポイントを打つ)
+                    </button>
+                    <button id="resetPickBtn" onclick="resetPoints()" class="pointer-events-auto hidden bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-full font-bold shadow-lg border-2 border-white items-center gap-2 transition-transform active:scale-95 text-lg">
+                        <span class="material-symbols-outlined text-2xl">delete</span> 3つのポイントをリセット
+                    </button>
+                `;
+                document.getElementById('studentContainer').appendChild(btnContainer);
+                // 昔の小さなボタンは非表示にする
+                document.querySelectorAll('.edit-points-btn').forEach(b => b.style.display = 'none');
+            }
+
+            // ★修正2: 画面クリックでの再生/停止処理を【削除】し、動画標準のコントロールバーに操作を一本化（競合による誤作動を防止）
+
+            // 見本動画のイベント
+            modelVideo.addEventListener('play', () => { 
+                document.getElementById('modelContainer').classList.remove('is-paused');
+                document.getElementById('modelContainer').classList.add('is-playing');
+                requestAnimationFrame(processModelLoop); 
+            });
+            modelVideo.addEventListener('pause', () => { 
+                document.getElementById('modelContainer').classList.remove('is-playing');
+                document.getElementById('modelContainer').classList.add('is-paused');
+                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); 
+            });
+            modelVideo.addEventListener('seeked', async () => { 
+                if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
+            });
+
+            // 自分の動画のイベント（同期再生 ＋ 大きなボタンの表示制御）
+            studentVideo.addEventListener('play', () => { 
+                document.getElementById('studentContainer').classList.remove('is-paused');
+                document.getElementById('studentContainer').classList.add('is-playing');
+                updateActionButtonsUI(); 
+                requestAnimationFrame(processStudentLoop); 
+                
+                // 見本動画も連動して再生
+                if (!modelVideo.classList.contains('hidden') && modelVideo.paused) {
+                    modelVideo.play();
+                }
+            });
+            studentVideo.addEventListener('pause', () => { 
+                document.getElementById('studentContainer').classList.remove('is-playing');
+                document.getElementById('studentContainer').classList.add('is-paused');
+                updateActionButtonsUI(); 
+                drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); 
+                
+                // 見本動画も連動して一時停止
+                if (!modelVideo.classList.contains('hidden') && !modelVideo.paused) {
+                    modelVideo.pause();
+                }
+            });
+            studentVideo.addEventListener('seeked', async () => { 
+                if (isAiReady && studentVideo.readyState >= 2) await poseModelStudent.send({ image: studentVideo }); 
+            });
+
+            videoUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file || !isAiReady) return;
+                
+                studentVideo.src = URL.createObjectURL(file);
+                document.getElementById('studentPlaceholder').classList.add('hidden');
+                studentVideo.classList.remove('hidden');
+                document.getElementById('studentCanvas').classList.remove('hidden');
+                
+                studentVideo.onloadedmetadata = () => {
+                    document.getElementById('studentCanvas').width = studentVideo.videoWidth;
+                    document.getElementById('studentCanvas').height = studentVideo.videoHeight;
+                    updateActionButtonsUI();
+                };
+            });
+
+            // ピッキング操作時のみクリックを許可
+            document.getElementById('studentCanvas').addEventListener('click', (e) => {
+                if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
+            });
+        }
+
+        function startPickingMode() {
+            currentPickingTarget = 'student';
+            selectedJoints = []; 
+            
+            const container = document.getElementById('studentContainer');
+            container.classList.add('picking-mode');
+            
+            updatePickCountUI();
+            updateActionButtonsUI(); 
+            
+            const isImage = !modelImage.classList.contains('hidden');
+            const isModelPaused = isImage ? true : modelVideo.paused;
+            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
+            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
+        }
+
+        function endPickingMode() {
+            if (!currentPickingTarget) return;
+            const container = document.getElementById('studentContainer');
+            container.classList.remove('picking-mode');
+            currentPickingTarget = null;
+
+            updateActionButtonsUI(); 
+            
+            // ★見本と自分の両方のキャンバスに自動描画（ポイント連動）
+            const isImage = !modelImage.classList.contains('hidden');
+            const isModelPaused = isImage ? true : modelVideo.paused;
+            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
+            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
+        }
+
+        function resetPoints() {
+            selectedJoints = [];
+            currentPickingTarget = null;
+            document.getElementById('studentContainer').classList.remove('picking-mode');
+            
+            updateActionButtonsUI(); 
+            
+            // 両方のキャンバスからポイントを消去
+            const isImage = !modelImage.classList.contains('hidden');
+            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused);
+            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
+        }
+
+        function handleCanvasClick(event, canvas, poseLandmarks) {
+            if (!poseLandmarks || currentPickingTarget !== 'student') return;
+            
+            const rect = canvas.getBoundingClientRect();
+            const videoRatio = canvas.width / canvas.height;
+            const rectRatio = rect.width / rect.height;
+            
+            let drawWidth, drawHeight, offsetX, offsetY;
+            if (videoRatio > rectRatio) {
+                drawWidth = rect.width;
+                drawHeight = rect.width / videoRatio;
+                offsetX = 0;
+                offsetY = (rect.height - drawHeight) / 2;
+            } else {
+                drawHeight = rect.height;
+                drawWidth = rect.height * videoRatio;
+                offsetX = (rect.width - drawWidth) / 2;
+                offsetY = 0;
+            }
+
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+            const normX = (clickX - offsetX) / drawWidth;
+            const normY = (clickY - offsetY) / drawHeight;
+
+            if (normX < 0 || normX > 1 || normY < 0 || normY > 1) return; 
+
+            let minDist = 0.15; 
+            let closestJoint = -1;
+            const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+            targetJoints.forEach(i => {
+                const p = poseLandmarks[i];
+                if (p && p.visibility > 0.5) {
+                    const dist = Math.sqrt(Math.pow(p.x - normX, 2) + Math.pow(p.y - normY, 2));
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestJoint = i;
+                    }
+                }
+            });
+
+            if (closestJoint !== -1) {
+                const index = selectedJoints.indexOf(closestJoint);
+                if (index !== -1) {
+                    selectedJoints.splice(index, 1);
+                } else {
+                    if (selectedJoints.length < 3) {
+                        selectedJoints.push(closestJoint);
+                    }
+                }
+                
+                updatePickCountUI();
+                
+                if (selectedJoints.length === 3) {
+                    // 3点目を選んだら自動でモード終了し、見本側にも反映
+                    endPickingMode();
+                } else {
+                    // 1, 2点選択中もリアルタイムで見本側に反映
+                    const isImage = !modelImage.classList.contains('hidden');
+                    const isModelPaused = isImage ? true : modelVideo.paused;
+                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
+                    drawSkeleton(canvas, poseLandmarks, studentVideo.paused);
+                }
             }
         }
 
@@ -351,72 +572,6 @@
             }
         }
 
-        function setupEventListeners() {
-            // ★修正3: 動画画面クリック時の自前再生/停止処理を削除しました。
-            // 動画のコントロールバー（標準機能）と自前のクリック判定が競合して「止まったり止まらなかったり」するのを防ぐため、操作は動画下部のコントロールバーに一本化します。
-
-            modelVideo.addEventListener('play', () => { 
-                document.getElementById('modelContainer').classList.remove('is-paused');
-                document.getElementById('modelContainer').classList.add('is-playing');
-                requestAnimationFrame(processModelLoop); 
-            });
-            modelVideo.addEventListener('pause', () => { 
-                document.getElementById('modelContainer').classList.remove('is-playing');
-                document.getElementById('modelContainer').classList.add('is-paused');
-                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, true); 
-            });
-            modelVideo.addEventListener('seeked', async () => { 
-                if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
-            });
-
-            studentVideo.addEventListener('play', () => { 
-                document.getElementById('studentContainer').classList.remove('is-paused');
-                document.getElementById('studentContainer').classList.add('is-playing');
-                updateActionButtonsUI(); // アクションボタンを隠す
-                requestAnimationFrame(processStudentLoop); 
-                
-                // 見本動画も連動して再生
-                if (modelVideo.classList.contains('hidden') === false && modelVideo.paused) {
-                    modelVideo.play();
-                }
-            });
-            studentVideo.addEventListener('pause', () => { 
-                document.getElementById('studentContainer').classList.remove('is-playing');
-                document.getElementById('studentContainer').classList.add('is-paused');
-                updateActionButtonsUI(); // アクションボタンを表示
-                drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, true); 
-                
-                // 見本動画も連動して一時停止
-                if (modelVideo.classList.contains('hidden') === false && !modelVideo.paused) {
-                    modelVideo.pause();
-                }
-            });
-            studentVideo.addEventListener('seeked', async () => { 
-                if (isAiReady && studentVideo.readyState >= 2) await poseModelStudent.send({ image: studentVideo }); 
-            });
-
-            videoUpload.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (!file || !isAiReady) return;
-                
-                studentVideo.src = URL.createObjectURL(file);
-                document.getElementById('studentPlaceholder').classList.add('hidden');
-                studentVideo.classList.remove('hidden');
-                document.getElementById('studentCanvas').classList.remove('hidden');
-                
-                studentVideo.onloadedmetadata = () => {
-                    document.getElementById('studentCanvas').width = studentVideo.videoWidth;
-                    document.getElementById('studentCanvas').height = studentVideo.videoHeight;
-                    updateActionButtonsUI();
-                };
-            });
-
-            // ピッキング操作時のみクリックを許可
-            document.getElementById('studentCanvas').addEventListener('click', (e) => {
-                if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
-            });
-        }
-
         async function processModelLoop() {
             if (!modelVideo.paused && !modelVideo.ended && !isProcessingModel && modelVideo.readyState >= 2) {
                 isProcessingModel = true;
@@ -435,117 +590,10 @@
             }
         }
 
-        function startPickingMode() {
-            currentPickingTarget = 'student';
-            selectedJoints = []; 
-            
-            const container = document.getElementById('studentContainer');
-            container.classList.add('picking-mode');
-            
-            updatePickCountUI();
-            updateActionButtonsUI();
-            
-            const isImage = !modelImage.classList.contains('hidden');
-            const isModelPaused = isImage ? true : modelVideo.paused;
-            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
-            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
-        }
-
-        function endPickingMode() {
-            if (!currentPickingTarget) return;
-            const container = document.getElementById('studentContainer');
-            container.classList.remove('picking-mode');
-            currentPickingTarget = null;
-
-            updateActionButtonsUI();
-            
-            const isImage = !modelImage.classList.contains('hidden');
-            const isModelPaused = isImage ? true : modelVideo.paused;
-            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
-            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
-        }
-
         function updatePickCountUI() {
             document.querySelectorAll('.pick-count').forEach(el => {
                 el.textContent = selectedJoints.length;
             });
-        }
-
-        function resetPoints() {
-            selectedJoints = [];
-            currentPickingTarget = null;
-            document.getElementById('studentContainer').classList.remove('picking-mode');
-            
-            updateActionButtonsUI();
-            
-            const isImage = !modelImage.classList.contains('hidden');
-            drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isImage ? true : modelVideo.paused);
-            drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent, studentVideo.paused);
-        }
-
-        function handleCanvasClick(event, canvas, poseLandmarks) {
-            if (!poseLandmarks || currentPickingTarget !== 'student') return;
-            
-            const rect = canvas.getBoundingClientRect();
-            const videoRatio = canvas.width / canvas.height;
-            const rectRatio = rect.width / rect.height;
-            
-            let drawWidth, drawHeight, offsetX, offsetY;
-            if (videoRatio > rectRatio) {
-                drawWidth = rect.width;
-                drawHeight = rect.width / videoRatio;
-                offsetX = 0;
-                offsetY = (rect.height - drawHeight) / 2;
-            } else {
-                drawHeight = rect.height;
-                drawWidth = rect.height * videoRatio;
-                offsetX = (rect.width - drawWidth) / 2;
-                offsetY = 0;
-            }
-
-            const clickX = event.clientX - rect.left;
-            const clickY = event.clientY - rect.top;
-            const normX = (clickX - offsetX) / drawWidth;
-            const normY = (clickY - offsetY) / drawHeight;
-
-            if (normX < 0 || normX > 1 || normY < 0 || normY > 1) return; 
-
-            let minDist = 0.15; 
-            let closestJoint = -1;
-            const targetJoints = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-
-            targetJoints.forEach(i => {
-                const p = poseLandmarks[i];
-                if (p && p.visibility > 0.5) {
-                    const dist = Math.sqrt(Math.pow(p.x - normX, 2) + Math.pow(p.y - normY, 2));
-                    if (dist < minDist) {
-                        minDist = dist;
-                        closestJoint = i;
-                    }
-                }
-            });
-
-            if (closestJoint !== -1) {
-                const index = selectedJoints.indexOf(closestJoint);
-                if (index !== -1) {
-                    selectedJoints.splice(index, 1);
-                } else {
-                    if (selectedJoints.length < 3) {
-                        selectedJoints.push(closestJoint);
-                    }
-                }
-                
-                updatePickCountUI();
-                
-                if (selectedJoints.length === 3) {
-                    endPickingMode();
-                } else {
-                    const isImage = !modelImage.classList.contains('hidden');
-                    const isModelPaused = isImage ? true : modelVideo.paused;
-                    drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel, isModelPaused);
-                    drawSkeleton(canvas, poseLandmarks, studentVideo.paused);
-                }
-            }
         }
 
         function calculateAngle(p1, p2, p3, width, height) {
