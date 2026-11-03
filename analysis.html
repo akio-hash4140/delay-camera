@@ -50,7 +50,7 @@
     <header class="h-12 shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm z-20">
         <div class="flex items-center space-x-2">
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
-            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.2</span></h1>
+            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.3</span></h1>
         </div>
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
@@ -143,7 +143,7 @@
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
-            // ★修正: 通信のすれ違いを防ぐため、親画面から返事が来るまで1秒おきにメッセージを送り続ける（リトライ機能）
+            // 通信のすれ違いを防ぐため、親画面から返事が来るまで1秒おきにメッセージを送り続ける
             if (window.opener) {
                 let retryCount = 0;
                 readyIntervalId = setInterval(() => {
@@ -169,16 +169,14 @@
         });
 
         window.addEventListener('message', (event) => {
-            // 親画面から技データが届いた時の処理
             if (event.data && event.data.type === 'TASK_DATA') {
-                if (readyIntervalId) clearInterval(readyIntervalId); // リトライを止める
+                if (readyIntervalId) clearInterval(readyIntervalId); 
                 const data = event.data.payload;
                 populateSelect(data);
             }
             
-            // 親画面から見本動画（Base64またはURL）が届いた時の処理
             if (event.data && event.data.type === 'BASE64_RESULT') {
-                if (base64TimeoutId) clearTimeout(base64TimeoutId); // タイムアウトを止める
+                if (base64TimeoutId) clearTimeout(base64TimeoutId); 
                 
                 const base64Data = event.data.base64;
                 const mediaType = event.data.mediaType;
@@ -213,7 +211,8 @@
                     }
                 } else {
                     placeholder.classList.remove('hidden');
-                    placeholder.innerHTML = "<span class="text-red-400 font-bold">読み込みに失敗しました（データが空です）</span>";
+                    // ★ エラーの原因だった「千切れた文字コード」を完全に修正しました
+                    placeholder.innerHTML = '<span class="text-red-400 font-bold">読み込みに失敗しました（データが空です）</span>';
                 }
             }
         });
@@ -261,14 +260,12 @@
                 return;
             }
             
-            // GASからの返答待ち表示
             placeholder.classList.remove('hidden');
             placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASから動画を取得中...</span>';
             
             if (window.opener) {
                 window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
                 
-                // ★修正: 10秒待ってもGASから動画が来なければ、フリーズ（重すぎる）と判断してエラー表示にする
                 if (base64TimeoutId) clearTimeout(base64TimeoutId);
                 base64TimeoutId = setTimeout(() => {
                     placeholder.innerHTML = '<span class="text-red-400 font-bold text-sm">⚠️ 動画の容量が大きすぎてGASがタイムアウトしました。<br>GASのCode.gsを修正してください。</span>';
