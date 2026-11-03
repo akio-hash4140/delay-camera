@@ -50,7 +50,7 @@
     <header class="h-12 shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm z-20">
         <div class="flex items-center space-x-2">
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
-            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.1</span></h1>
+            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.2</span></h1>
         </div>
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
@@ -68,7 +68,7 @@
                     <span class="material-symbols-outlined" style="font-size: 14px;">menu_book</span> 見本
                 </span>
                 <select id="taskSelect" onchange="changeModelMedia()" class="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:outline-none focus:border-blue-500">
-                    <option value="">データを読み込み中...</option>
+                    <option value="">GASからの応答を待機中...</option>
                 </select>
             </div>
 
@@ -77,7 +77,7 @@
                 <img id="modelImage" class="absolute inset-0 w-full h-full object-contain hidden">
                 <canvas id="modelCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
-                <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-bold pointer-events-none z-20">
+                <div id="modelPlaceholder" class="absolute inset-0 flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-bold pointer-events-none z-20 text-center px-4">
                     上のメニューから技を選んでください
                 </div>
             </div>
@@ -96,7 +96,7 @@
                     </label>
                 </div>
                 
-                <!-- ★あなたのアイデアを採用した常設ボタン -->
+                <!-- 上部常設ボタン -->
                 <div class="flex items-center gap-2">
                     <button id="topStartPickBtn" onclick="startPickingMode()" class="opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 px-3 rounded flex items-center gap-1 shadow-sm transition-colors">
                         <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> 角度を測る
@@ -133,6 +133,9 @@
 
         let selectedJoints = [];
         let currentPickingTarget = null; 
+        
+        let readyIntervalId = null;
+        let base64TimeoutId = null;
 
         window.addEventListener('DOMContentLoaded', () => {
             modelVideo = document.getElementById('modelVideo');
@@ -140,8 +143,23 @@
             studentVideo = document.getElementById('studentVideo');
             videoUpload = document.getElementById('videoUpload');
 
+            // ★修正: 通信のすれ違いを防ぐため、親画面から返事が来るまで1秒おきにメッセージを送り続ける（リトライ機能）
             if (window.opener) {
-                window.opener.postMessage({ type: 'APP_READY' }, '*');
+                let retryCount = 0;
+                readyIntervalId = setInterval(() => {
+                    if (taskDataList.length > 0) {
+                        clearInterval(readyIntervalId);
+                        return;
+                    }
+                    retryCount++;
+                    document.getElementById("taskSelect").innerHTML = `<option value="">GASと通信中... (再試行: ${retryCount}回)</option>`;
+                    window.opener.postMessage({ type: 'APP_READY' }, '*');
+                    
+                    if (retryCount >= 10) {
+                        document.getElementById("taskSelect").innerHTML = '<option value="">⚠️ GAS側でエラーが発生しています。親画面を更新してください。</option>';
+                        clearInterval(readyIntervalId);
+                    }
+                }, 1000);
             } else {
                 document.getElementById("taskSelect").innerHTML = '<option value="">メインアプリから開いてください</option>';
             }
@@ -151,11 +169,17 @@
         });
 
         window.addEventListener('message', (event) => {
+            // 親画面から技データが届いた時の処理
             if (event.data && event.data.type === 'TASK_DATA') {
+                if (readyIntervalId) clearInterval(readyIntervalId); // リトライを止める
                 const data = event.data.payload;
                 populateSelect(data);
             }
+            
+            // 親画面から見本動画（Base64またはURL）が届いた時の処理
             if (event.data && event.data.type === 'BASE64_RESULT') {
+                if (base64TimeoutId) clearTimeout(base64TimeoutId); // タイムアウトを止める
+                
                 const base64Data = event.data.base64;
                 const mediaType = event.data.mediaType;
                 const placeholder = document.getElementById("modelPlaceholder");
@@ -188,7 +212,8 @@
                         };
                     }
                 } else {
-                    placeholder.innerHTML = "読み込みに失敗しました";
+                    placeholder.classList.remove('hidden');
+                    placeholder.innerHTML = "<span class="text-red-400 font-bold">読み込みに失敗しました（データが空です）</span>";
                 }
             }
         });
@@ -236,11 +261,18 @@
                 return;
             }
             
+            // GASからの返答待ち表示
             placeholder.classList.remove('hidden');
-            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASからデータを読み込み中...</span>';
+            placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASから動画を取得中...</span>';
             
             if (window.opener) {
                 window.opener.postMessage({ type: 'REQUEST_BASE64', fileId: task.fileId, mediaType: task.type }, '*');
+                
+                // ★修正: 10秒待ってもGASから動画が来なければ、フリーズ（重すぎる）と判断してエラー表示にする
+                if (base64TimeoutId) clearTimeout(base64TimeoutId);
+                base64TimeoutId = setTimeout(() => {
+                    placeholder.innerHTML = '<span class="text-red-400 font-bold text-sm">⚠️ 動画の容量が大きすぎてGASがタイムアウトしました。<br>GASのCode.gsを修正してください。</span>';
+                }, 10000);
             }
         }
 
@@ -322,7 +354,6 @@
                 if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
             });
 
-            // 自分の動画と見本動画の「同期再生」
             studentVideo.addEventListener('play', () => { 
                 requestAnimationFrame(processStudentLoop); 
                 if (!modelVideo.classList.contains('hidden') && modelVideo.paused) {
@@ -352,8 +383,7 @@
                     document.getElementById('studentCanvas').width = studentVideo.videoWidth;
                     document.getElementById('studentCanvas').height = studentVideo.videoHeight;
                     updateActionButtonsUI();
-                    
-                    // ★ 確実な解決策：0.1秒だけ動画を進めることで、自動的にAIが1フレーム目を解析しエラーが出なくなります。
+                    // AIに初期フレームを確実に認識させる
                     studentVideo.currentTime = 0.1;
                 };
             });
@@ -381,11 +411,9 @@
             }
         }
 
-        // 上の「角度を測る」ボタンを押したときの処理
         async function startPickingMode() {
             if (!studentVideo.src) return; 
             
-            // ★再生中なら自動で一時停止！
             if (!studentVideo.paused) studentVideo.pause();
             if (modelVideo.src && !modelVideo.paused) modelVideo.pause();
             
