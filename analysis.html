@@ -50,7 +50,7 @@
     <header class="h-12 shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between shadow-sm z-20">
         <div class="flex items-center space-x-2">
             <span class="material-symbols-outlined text-blue-600">directions_run</span>
-            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.0</span></h1>
+            <h1 class="font-bold text-base text-slate-800">マット運動 AI分析 <span class="text-xs text-slate-400 ml-2">v4.1</span></h1>
         </div>
         <div id="aiStatus" class="flex items-center gap-1.5 text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">
             <div class="loader"></div>
@@ -96,7 +96,7 @@
                     </label>
                 </div>
                 
-                <!-- ★新提案の「上部常設ボタン」 -->
+                <!-- ★あなたのアイデアを採用した常設ボタン -->
                 <div class="flex items-center gap-2">
                     <button id="topStartPickBtn" onclick="startPickingMode()" class="opacity-50 cursor-not-allowed bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 px-3 rounded flex items-center gap-1 shadow-sm transition-colors">
                         <span class="material-symbols-outlined" style="font-size: 16px;">edit</span> 角度を測る
@@ -108,7 +108,6 @@
             </div>
 
             <div id="studentContainer" class="flex-1 bg-black rounded overflow-hidden relative group">
-                <!-- 標準のコントロールバーのみを使用 -->
                 <video id="studentVideo" controls playsinline class="absolute inset-0 w-full h-full object-contain hidden"></video>
                 <canvas id="studentCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none z-10 hidden"></canvas>
                 
@@ -175,7 +174,7 @@
                             canvas.height = modelImage.naturalHeight;
                             if (isAiReady) {
                                 try { await poseModelModel.send({ image: modelImage }); } 
-                                catch (e) { console.error("AI解析エラー:", e); }
+                                catch (e) { console.error(e); }
                             }
                         };
                     } else {
@@ -237,7 +236,6 @@
                 return;
             }
             
-            // GASからの返答待ち表示
             placeholder.classList.remove('hidden');
             placeholder.innerHTML = '<div class="loader"></div><span class="ml-2 text-white">GASからデータを読み込み中...</span>';
             
@@ -246,12 +244,10 @@
             }
         }
 
-        // 上部の常設ボタンの表示切替
         function updateActionButtonsUI() {
             const startBtn = document.getElementById('topStartPickBtn');
             const resetBtn = document.getElementById('topResetPickBtn');
             
-            // まだ動画がアップロードされていない場合は押せないようにする
             if (!studentVideo.src) {
                 startBtn.classList.add('opacity-50', 'cursor-not-allowed');
                 startBtn.classList.remove('hidden');
@@ -320,12 +316,8 @@
         }
 
         function setupEventListeners() {
-            modelVideo.addEventListener('play', () => { 
-                requestAnimationFrame(processModelLoop); 
-            });
-            modelVideo.addEventListener('pause', () => { 
-                drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel); 
-            });
+            modelVideo.addEventListener('play', () => { requestAnimationFrame(processModelLoop); });
+            modelVideo.addEventListener('pause', () => { drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel); });
             modelVideo.addEventListener('seeked', async () => { 
                 if (isAiReady && modelVideo.readyState >= 2) await poseModelModel.send({ image: modelVideo }); 
             });
@@ -356,20 +348,16 @@
                 studentVideo.classList.remove('hidden');
                 document.getElementById('studentCanvas').classList.remove('hidden');
                 
-                studentVideo.onloadedmetadata = async () => {
+                studentVideo.onloadedmetadata = () => {
                     document.getElementById('studentCanvas').width = studentVideo.videoWidth;
                     document.getElementById('studentCanvas').height = studentVideo.videoHeight;
                     updateActionButtonsUI();
                     
-                    // ★ 修正点：動画アップロード直後に「1フレームだけ強制的にAIに読ませる」ことで、一時停止のまま即座にポイントを打てるようにしました！
-                    if (isAiReady) {
-                        try { await poseModelStudent.send({ image: studentVideo }); } 
-                        catch (err) { console.error(err); }
-                    }
+                    // ★ 確実な解決策：0.1秒だけ動画を進めることで、自動的にAIが1フレーム目を解析しエラーが出なくなります。
+                    studentVideo.currentTime = 0.1;
                 };
             });
 
-            // ピッキング操作時のみキャンバスのクリックを許可
             document.getElementById('studentCanvas').addEventListener('click', (e) => {
                 if (currentPickingTarget === 'student') handleCanvasClick(e, document.getElementById('studentCanvas'), lastPoseStudent);
             });
@@ -393,15 +381,14 @@
             }
         }
 
-        // ★ 新提案：「角度を測る」ボタンを押したときの動作
+        // 上の「角度を測る」ボタンを押したときの処理
         async function startPickingMode() {
-            if (!studentVideo.src) return; // 動画がない時は無効
+            if (!studentVideo.src) return; 
             
-            // 動画が再生中なら自動で一時停止する
+            // ★再生中なら自動で一時停止！
             if (!studentVideo.paused) studentVideo.pause();
             if (modelVideo.src && !modelVideo.paused) modelVideo.pause();
             
-            // ピッキングモード開始
             currentPickingTarget = 'student';
             selectedJoints = []; 
             document.getElementById('studentContainer').classList.add('picking-mode');
@@ -419,7 +406,6 @@
             currentPickingTarget = null;
             updateActionButtonsUI(); 
             
-            // ★ 見本と自分の両方に自動でポイントを描画
             drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel);
             drawSkeleton(document.getElementById('studentCanvas'), lastPoseStudent);
         }
@@ -440,7 +426,7 @@
 
         function handleCanvasClick(event, canvas, poseLandmarks) {
             if (!poseLandmarks) {
-                console.warn("まだAIが骨格を認識していません");
+                console.warn("AI未認識");
                 return;
             }
             if (currentPickingTarget !== 'student') return;
@@ -497,9 +483,8 @@
                 updatePickCountUI();
                 
                 if (selectedJoints.length === 3) {
-                    endPickingMode(); // 3点で自動終了＆連動
+                    endPickingMode(); 
                 } else {
-                    // ★1〜2点選択中もリアルタイムで見本側に反映させる
                     drawSkeleton(document.getElementById('modelCanvas'), lastPoseModel);
                     drawSkeleton(canvas, poseLandmarks);
                 }
